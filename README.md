@@ -2,29 +2,31 @@
 
 TePee-X Command Center proofs. A salesperson picks a client, a SKU, and a logo — the generator locks the print zone and renders the **quoted decoration method**, not a Photoshop blend.
 
-## Decoration matrix
+## Decoration matrix (locked)
 
-A wrong method is a quoting error. Each SKU only offers what production can actually run:
+A wrong method is a quoting error. Copy never uses pad print, screen print, emboss, or deboss.
 
-| Method | Reads as |
+| Category | Method |
 | --- | --- |
-| Laser engrave | Substrate reveal + inner shadow (pens, flasks, USB, awards) |
-| Sublimation | Dye in the coat (mugs) |
-| UV DTF | Film on the surface with a slight raise |
-| Pad / screen | Spot colour, slightly inset |
-| Embroidery | Satin direction on textile |
-| Deboss / foil | Recess or metallic stamp |
+| Metal pen, flask, USB, crystal | Laser Engraving |
+| Ceramic mug | Sublimation |
+| Bag, tote, box, notebook, power bank | UV Printing |
+| Apparel (tee, polo, cap, hoodie) | Embroidery (+ UV DTF) |
+| Textiles | UV DTF |
+
+Proof PDF: navy `#04263F`, orange `#D1812E`, Montserrat, contact block.
 
 ## Run
 
 ```bash
 npm install
 npm run dev
+npm test
 ```
 
-Workflow: client → quote/sample/order ref → SKU → logo → method (locked) → QC → Approve into CC → branded PDF (navy / orange).
+Workflow: client → quote/sample/order ref → SKU → logo → method (locked) → QC → Approve into CC → branded PDF.
 
-`XAI_API_KEY` enables vision zone-lock and Imagine product stills. Catalog SKUs and the local silhouette lock work without it.
+Scan is local (contrast vs backdrop). No vision API.
 
 ## License
 

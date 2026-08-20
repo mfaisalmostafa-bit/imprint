@@ -12,11 +12,11 @@ export const Route = createRootRoute({
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
       { title: APP_NAME },
-      { name: "theme-color", content: "#0B1F3A" },
+      { name: "theme-color", content: "#04263F" },
       {
         name: "description",
         content:
-          "TePee-X Command Center mockups — laser, sublimation, UV DTF, embroidery. Print-true proofs for quotes, samples, and orders.",
+          "TePee-X Command Center mockups — laser engraving, UV printing, sublimation, embroidery. Print-true proofs for quotes, samples, and orders.",
       },
     ],
     links: [

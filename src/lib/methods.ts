@@ -1,16 +1,13 @@
-/** Print-decoration matrix. A method is a quoting fact, not a Photoshop blend. */
+/** Locked TePee-X decoration matrix. A method is a quoting fact. */
 
 export type MethodId =
   | "laser_engrave"
-  | "sublimation"
+  | "uv_print"
   | "uv_dtf"
-  | "pad_print"
-  | "embroidery"
-  | "screen_print"
-  | "deboss"
-  | "foil";
+  | "sublimation"
+  | "embroidery";
 
-export type MethodFamily = "etch" | "ink" | "fiber" | "press";
+export type MethodFamily = "etch" | "ink" | "fiber";
 
 export type MethodDef = {
   id: MethodId;
@@ -21,21 +18,32 @@ export type MethodDef = {
   ink: boolean;
 };
 
+/** Never appear in copy, proofs, or the method picker. */
+export const BLACKLISTED_TERMS = [
+  "pad print",
+  "pad_print",
+  "screen print",
+  "screen_print",
+  "emboss",
+  "deboss",
+  "foil",
+] as const;
+
 export const METHODS: Record<MethodId, MethodDef> = {
   laser_engrave: {
     id: "laser_engrave",
-    label: "Laser engrave",
+    label: "Laser Engraving",
     short: "Laser",
     family: "etch",
     quoteLine: "Laser removes coating / frosts substrate. Proof must read as engraved metal, not ink.",
     ink: false,
   },
-  sublimation: {
-    id: "sublimation",
-    label: "Sublimation",
-    short: "Subli",
+  uv_print: {
+    id: "uv_print",
+    label: "UV Printing",
+    short: "UV",
     family: "ink",
-    quoteLine: "Dye soaks into polymer/coating. Full colour, no raised edge.",
+    quoteLine: "House default. UV ink on the surface — bags, totes, plastic, notebooks, power banks.",
     ink: true,
   },
   uv_dtf: {
@@ -43,15 +51,15 @@ export const METHODS: Record<MethodId, MethodDef> = {
     label: "UV DTF",
     short: "UV DTF",
     family: "ink",
-    quoteLine: "UV transfer film sits on the surface with a slight raise.",
+    quoteLine: "Transfer film on textiles and apparel. Never quote UV DTF as UV Printing.",
     ink: true,
   },
-  pad_print: {
-    id: "pad_print",
-    label: "Pad print",
-    short: "Pad",
+  sublimation: {
+    id: "sublimation",
+    label: "Sublimation",
+    short: "Subli",
     family: "ink",
-    quoteLine: "1–2 spot colours, slightly inset into the part.",
+    quoteLine: "Dye soaks into polymer/ceramic coat. Full colour, no raised edge.",
     ink: true,
   },
   embroidery: {
@@ -59,42 +67,15 @@ export const METHODS: Record<MethodId, MethodDef> = {
     label: "Embroidery",
     short: "Emb",
     family: "fiber",
-    quoteLine: "Thread on textile. Satin direction, not a flat sticker.",
-    ink: false,
-  },
-  screen_print: {
-    id: "screen_print",
-    label: "Screen print",
-    short: "Screen",
-    family: "ink",
-    quoteLine: "Spot-colour ink on fabric. Opaque, flat.",
-    ink: true,
-  },
-  deboss: {
-    id: "deboss",
-    label: "Deboss",
-    short: "Deboss",
-    family: "press",
-    quoteLine: "Blind stamp into cover stock. Recess only — no foil unless specified.",
-    ink: false,
-  },
-  foil: {
-    id: "foil",
-    label: "Foil stamp",
-    short: "Foil",
-    family: "press",
-    quoteLine: "Metallic foil laid into a stamp. Gold or silver, not CMYK.",
+    quoteLine: "Thread on apparel. Satin direction, not a flat sticker.",
     ink: false,
   },
 };
 
 export const METHOD_ORDER: MethodId[] = [
   "laser_engrave",
-  "sublimation",
+  "uv_print",
   "uv_dtf",
-  "pad_print",
+  "sublimation",
   "embroidery",
-  "screen_print",
-  "deboss",
-  "foil",
 ];

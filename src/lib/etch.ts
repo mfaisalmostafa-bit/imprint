@@ -19,7 +19,7 @@ function substrateFor(material: string): [number, number, number] {
 
 /**
  * Composite a warped logo layer onto the product using a real decoration method.
- * Laser / deboss / foil read as substrate change, not a blend mode.
+ * Laser reads as substrate change. UV print / sublimation / UV DTF / embroidery are ink or thread.
  */
 export function compositeDecoration(
   ctx: CanvasRenderingContext2D,
@@ -106,22 +106,13 @@ export function compositeDecoration(
         pr = pr + (sr - pr) * t - inner * 50 + spec * 48;
         pg = pg + (sg - pg) * t - inner * 50 + spec * 44;
         pb = pb + (sb - pb) * t - inner * 44 + spec * 52;
-      } else if (method === "deboss") {
-        const eL = etchAt(x - 1, y);
-        const eU = etchAt(x, y - 1);
-        const inner = Math.max(0, etch - eL * 0.5 - eU * 0.5);
-        const t = etch * 0.55;
-        pr = pr * (1 - t) - inner * 28;
-        pg = pg * (1 - t) - inner * 28;
-        pb = pb * (1 - t) - inner * 24;
-      } else if (method === "foil") {
-        const t = Math.min(1, etch * 1.1);
-        const shine = 0.72 + 0.28 * Math.sin((x + y) * 0.04);
-        pr = pr + (212 * shine - pr) * t;
-        pg = pg + (168 * shine - pg) * t;
-        pb = pb + (72 * shine - pb) * t;
       } else if (method === "sublimation") {
         const t = (a0 / 255) * amt * 0.9;
+        pr = pr + (lr - pr) * t;
+        pg = pg + (lg - pg) * t;
+        pb = pb + (lb - pb) * t;
+      } else if (method === "uv_print") {
+        const t = (a0 / 255) * amt * 0.96;
         pr = pr + (lr - pr) * t;
         pg = pg + (lg - pg) * t;
         pb = pb + (lb - pb) * t;
@@ -131,11 +122,6 @@ export function compositeDecoration(
         pr = pr + (lr - pr) * t + Math.max(0, e) * 18;
         pg = pg + (lg - pg) * t + Math.max(0, e) * 18;
         pb = pb + (lb - pb) * t + Math.max(0, e) * 16;
-      } else if (method === "pad_print" || method === "screen_print") {
-        const t = etch * 0.96;
-        pr = pr + (lr - pr) * t;
-        pg = pg + (lg - pg) * t;
-        pb = pb + (lb - pb) * t;
       } else if (method === "embroidery") {
         const stitch = 0.82 + 0.18 * Math.sin(x * 0.9 + y * 0.12);
         const t = (a0 / 255) * amt;

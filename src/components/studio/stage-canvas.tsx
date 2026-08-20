@@ -110,7 +110,7 @@ export const StageCanvas = forwardRef<StageHandle>(function StageCanvas(_, ref) 
         ctx.clip();
         ctx.drawImage(product, 0, 0, w, h);
         ctx.restore();
-        ctx.fillStyle = "rgb(232, 93, 4)";
+        ctx.fillStyle = "rgb(209, 129, 46)";
         ctx.fillRect(w / 2 - 1, 0, 2, h);
       }
 
