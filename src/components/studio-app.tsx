@@ -10,8 +10,7 @@ import { ToolRail } from "@/components/studio/tool-rail";
 import { EditorStage } from "@/components/studio/editor-stage";
 import { GenerateBar } from "@/components/studio/generate-bar";
 import { useStudio } from "@/lib/store";
-import { compressForEdit, compressForScan } from "@/lib/image";
-import { scanSurface } from "@/lib/scan";
+import { compressForEdit } from "@/lib/image";
 import { detectSurface } from "@/lib/detect";
 import { generateProduct, imagineEdit } from "@/lib/imagine";
 import { listClients, saveProof } from "@/lib/cc";
@@ -65,7 +64,11 @@ export function StudioApp() {
   const runLocalDetect = async (src: string) => {
     try {
       const local = await detectSurface(src);
-      applyScan(local);
+      if (local.accepted) applyScan(local);
+      else {
+        useStudio.getState().setScanError(local.notes);
+        useStudio.getState().setScanning(false);
+      }
     } catch {
       /* keep current quad */
     }
@@ -76,21 +79,23 @@ export function StudioApp() {
     setScanning(true);
     setMode("studio");
     try {
-      const local = await detectSurface(productSrc);
-      applyScan(local);
-      const dataUrl = await compressForScan(productSrc);
-      const result = await scanSurface({ data: { imageDataUrl: dataUrl } });
-      if (result.ok) {
-        applyScan(result);
-        toast("Plane locked");
+      const local = await detectSurface(
+        productSrc,
+        mockupId === "custom" ? undefined : quad,
+      );
+      if (local.accepted) {
+        applyScan(local);
+        toast(`Plane locked · ${Math.round(local.confidence * 100)}%`);
       } else {
-        setScanError(result.error);
+        setScanError(local.notes);
         toast(local.notes);
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : "Scan failed";
       setScanError(message);
       toast(message);
+    } finally {
+      setScanning(false);
     }
   };
 
@@ -163,11 +168,8 @@ export function StudioApp() {
         return;
       }
       setCustomProduct(result.src, prompt.slice(0, 42));
-      toast("Product made — scanning plane");
+      toast("Product made — locking plane");
       await runLocalDetect(result.src);
-      const dataUrl = await compressForScan(result.src);
-      const scan = await scanSurface({ data: { imageDataUrl: dataUrl } });
-      if (scan.ok) applyScan(scan);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Generate failed";
       setScanError(message);

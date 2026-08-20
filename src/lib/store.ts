@@ -336,7 +336,7 @@ export const useStudio = create<StudioState>((set, get) => ({
       surfaceLabel: "Unscanned plane",
       material: "unknown",
       confidence: null,
-      brainNote: "Scan the surface — local brain runs first, then Grok if you ask.",
+      brainNote: "Scan the surface — local contrast lock, no API.",
       scanError: null,
       scale: 0.7,
       offsetX: 0,

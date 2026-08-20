@@ -172,6 +172,11 @@ export function BrainPanel({ onScan }: { onScan: () => void }) {
         )}
         {scanError ? <p className="text-sm text-destructive">{scanError}</p> : null}
         {brainNote ? <p className="text-xs text-muted-foreground">{brainNote}</p> : null}
+        {confidence != null ? (
+          <p className="text-xs tabular-nums text-muted-foreground">
+            Confidence {Math.round(confidence * 100)}%
+          </p>
+        ) : null}
         <Button className="w-full" onClick={onScan} disabled={scanning}>
           <ScanSearch />
           {scanning ? "Reading zone…" : "Lock print zone"}

@@ -22,7 +22,9 @@ export function Catalog({ layout }: { layout: "side" | "row" }) {
     pushHistory();
     setCustomProduct(url, file.name.replace(/\.[^.]+$/, "") || "Your product");
     detectSurface(url)
-      .then(applyScan)
+      .then((d) => {
+        if (d.accepted) applyScan(d);
+      })
       .catch(() => undefined);
   };
 
