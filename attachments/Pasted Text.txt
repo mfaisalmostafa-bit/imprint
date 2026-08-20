@@ -1,0 +1,79 @@
+Here is the prompt for Grok Build. Copy and paste it:
+
+Build / enhance a professional TPX Mockup Generator for TePee-X, a B2B corporate gifts and promotional materials company in Egypt.
+This is not a generic image toy. It is a production tool for realistic product branding mockups that sales and design can trust, and it must connect to the TPX Command Center (CC).
+Core purpose
+Generate clean, realistic mockups of client logos on promotional products:
+	•	mugs, flasks, pens, notebooks, USB drives, power banks, apparel, bags, awards, gift sets, packaging, and similar items
+	•	correct placement, scale, rotation, and print-area awareness
+	•	premium B2B look suitable for multinational clients
+Must-have capabilities
+1. Logo handling
+	•	upload logo (PNG/SVG preferred)
+	•	auto background removal when needed
+	•	keep transparency
+	•	preserve logo proportions
+	•	support one-color / full-color treatments
+	•	optional recolor toward print-safe or brand-constrained versions
+	•	reject or warn on low-quality logos
+2. Product mockup engine
+	•	place logo on real product areas only (print zones)
+	•	correct perspective, curvature, wrap, and lighting
+	•	no floating / stretched / amateur logo paste
+	•	consistent shadows and reflections
+	•	support multiple product angles when available
+	•	batch mockups for multiple products from one logo
+3. Brand / output quality
+	•	high-resolution export
+	•	clean white or controlled studio backgrounds
+	•	consistent catalog style across outputs
+	•	optional TPX navy accent framing only where useful, not forced on the product itself
+	•	side-by-side: original product vs branded mockup
+	•	export PNG + web-optimized versions
+4. Business workflow
+	•	choose client + product + logo
+	•	generate mockup
+	•	review / approve / reject
+	•	save to client folder
+	•	send approved mockup into Command Center flow
+	•	keep history of generated mockups per client / quote / order
+5. Command Center connection Connect to TPX CC so the tool is not isolated:
+	•	pull client name / logo candidates when available
+	•	attach mockups to quote, sample, or order context
+	•	let sales open generator from relevant CC screens
+	•	store outputs where the team can reuse them
+	•	no broken auth or orphan routes
+6. Speed and usability
+	•	fast single mockup generation
+	•	simple UI for non-designers
+	•	mobile-usable review
+	•	clear loading / failure states
+	•	no silent failures
+	•	retry on failed generation
+7. Quality controls
+	•	warn if logo is too low-res for the print area
+	•	warn if contrast is weak on product color
+	•	prevent unrealistic oversized logos
+	•	keep safe margins from edges and seams
+	•	version the generation settings so results are reproducible
+Enhancement goal
+I already have a mockup generator. Improve it into a reliable production system:
+	•	more realistic placement
+	•	better logo treatment
+	•	cleaner consistency
+	•	stronger CC integration
+	•	fewer bad outputs
+	•	faster usable workflow for sales
+Non-goals
+	•	not a full Photoshop replacement
+	•	not random artistic image generation
+	•	not consumer meme-style mockups
+	•	not unrelated AI chat features
+Success standard
+A salesperson can:
+	1	pick client + product
+	2	upload or select logo
+	3	get a realistic branded mockup quickly
+	4	approve it
+	5	use it in quote / sample / client communication with results that look professional enough for corporate buyers.
+Build the strongest practical version of this tool and wire it cleanly into the TPX Command Center workflow.

@@ -1,19 +1,13 @@
-import { ScanSearch, RotateCcw, Box } from "lucide-react";
+import { ScanSearch, RotateCcw, Box, Check } from "lucide-react";
 import type { ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { useStudio } from "@/lib/store";
 import { formatDeg, homography, poseFromQuad, UNIT_QUAD } from "@/lib/geometry";
-import { type BlendMode, type WrapMode } from "@/lib/mockups";
+import { METHODS } from "@/lib/methods";
+import { inspectPlacement } from "@/lib/qc";
+import { SPOT_SWATCHES, type Treatment } from "@/lib/treat";
 import { cn } from "@/lib/utils";
-
-const BLENDS: { id: BlendMode; label: string }[] = [
-  { id: "multiply", label: "Multiply" },
-  { id: "screen", label: "Screen" },
-  { id: "overlay", label: "Overlay" },
-  { id: "soft-light", label: "Soft" },
-  { id: "source-over", label: "Normal" },
-];
 
 function Row({
   label,
@@ -42,7 +36,6 @@ export function BrainPanel({ onScan }: { onScan: () => void }) {
   const scale = useStudio((s) => s.scale);
   const opacity = useStudio((s) => s.opacity);
   const lighting = useStudio((s) => s.lighting);
-  const blend = useStudio((s) => s.blend);
   const wrap = useStudio((s) => s.wrap);
   const cylinderArc = useStudio((s) => s.cylinderArc);
   const invert = useStudio((s) => s.invert);
@@ -53,16 +46,21 @@ export function BrainPanel({ onScan }: { onScan: () => void }) {
   const confidence = useStudio((s) => s.confidence);
   const surfaceLabel = useStudio((s) => s.surfaceLabel);
   const material = useStudio((s) => s.material);
+  const method = useStudio((s) => s.method);
+  const treatment = useStudio((s) => s.treatment);
+  const spotId = useStudio((s) => s.spotId);
+  const mockup = useStudio((s) => s.mockup());
 
   const setScale = useStudio((s) => s.setScale);
   const setOpacity = useStudio((s) => s.setOpacity);
   const setLighting = useStudio((s) => s.setLighting);
-  const setBlend = useStudio((s) => s.setBlend);
-  const setWrap = useStudio((s) => s.setWrap);
   const setCylinderArc = useStudio((s) => s.setCylinderArc);
   const setInvert = useStudio((s) => s.setInvert);
   const setShowGuides = useStudio((s) => s.setShowGuides);
   const resetPlacement = useStudio((s) => s.resetPlacement);
+  const setMethod = useStudio((s) => s.setMethod);
+  const setTreatment = useStudio((s) => s.setTreatment);
+  const setSpotId = useStudio((s) => s.setSpotId);
 
   const pose = poseFromQuad(quad);
   let matrix: string[] = ["—", "—", "—", "—", "—", "—", "—", "—", "—"];
@@ -72,47 +70,119 @@ export function BrainPanel({ onScan }: { onScan: () => void }) {
     /* keep dashes */
   }
 
+  const allowed = "methods" in mockup ? mockup.methods : [];
+  const maxScale = "maxScale" in mockup ? mockup.maxScale : 0.9;
+  const sku = "sku" in mockup ? mockup.sku : "CUSTOM";
+  const flags = inspectPlacement({
+    scale,
+    maxScale,
+    quad,
+    method,
+    allowed,
+    productTone: "tone" in mockup ? mockup.tone : "mid",
+    invert,
+  });
+
   return (
     <div className="flex h-full min-h-0 flex-col gap-6 overflow-y-auto p-4">
       <header className="space-y-1">
-        <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Brain</p>
-        <h2 className="font-serif text-2xl leading-tight text-foreground">{surfaceLabel}</h2>
+        <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">{sku}</p>
+        <h2 className="font-sans text-lg font-semibold leading-tight text-foreground">{surfaceLabel}</h2>
         <p className="text-sm capitalize text-muted-foreground">{material}</p>
+        {"printWmm" in mockup ? (
+          <p className="text-xs tabular-nums text-muted-foreground">
+            Print {mockup.printWmm} × {mockup.printHmm} mm
+          </p>
+        ) : null}
       </header>
 
-      <div className="space-y-3 rounded-lg bg-secondary p-3">
-        <div className="flex items-center justify-between">
-          <span className="text-xs uppercase tracking-wider text-muted-foreground">Lock</span>
-          {confidence != null ? (
-            <span className="text-xs tabular-nums text-foreground">
-              {Math.round(confidence * 100)}%
-            </span>
-          ) : (
-            <span className="text-xs text-muted-foreground">Unscanned</span>
-          )}
+      <div className="space-y-2">
+        <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Decoration</p>
+        <div className="flex flex-wrap gap-2">
+          {allowed.map((id) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setMethod(id)}
+              className={cn(
+                "h-10 rounded-md px-3 text-xs shadow-[var(--shadow-border)]",
+                method === id ? "bg-primary text-primary-foreground" : "bg-secondary text-foreground",
+              )}
+            >
+              {METHODS[id].short}
+            </button>
+          ))}
         </div>
-        <div className="h-1 overflow-hidden rounded-full bg-background">
-          <div
-            className="h-full bg-primary"
-            style={{ width: `${Math.round((confidence ?? 0) * 100)}%` }}
-          />
+        <p className="text-xs leading-snug text-muted-foreground">{METHODS[method].quoteLine}</p>
+      </div>
+
+      <div className="space-y-2">
+        <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Mark treatment</p>
+        <div className="grid grid-cols-3 gap-2">
+          {(["knockout", "full", "one_color"] as Treatment[]).map((t) => (
+            <button
+              key={t}
+              type="button"
+              onClick={() => setTreatment(t)}
+              className={cn(
+                "h-10 rounded-md text-[11px] shadow-[var(--shadow-border)]",
+                treatment === t ? "bg-primary text-primary-foreground" : "bg-secondary text-foreground",
+              )}
+            >
+              {t === "knockout" ? "Knockout" : t === "full" ? "Full colour" : "1-colour"}
+            </button>
+          ))}
         </div>
-        {brainNote ? <p className="text-sm leading-snug text-muted-foreground">{brainNote}</p> : null}
+        {treatment === "one_color" ? (
+          <div className="flex flex-wrap gap-2">
+            {SPOT_SWATCHES.map((s) => (
+              <button
+                key={s.id}
+                type="button"
+                aria-label={s.label}
+                onClick={() => setSpotId(s.id)}
+                className={cn(
+                  "size-8 rounded-full shadow-[var(--shadow-border)]",
+                  spotId === s.id && "ring-2 ring-primary",
+                )}
+                style={{ background: `rgb(${s.rgb.join(",")})` }}
+              />
+            ))}
+          </div>
+        ) : null}
+      </div>
+
+      <div className="space-y-2 rounded-lg bg-secondary p-3">
+        <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">QC</p>
+        {flags.length === 0 ? (
+          <p className="flex items-center gap-2 text-sm text-ok">
+            <Check className="size-3.5" />
+            Print-safe
+          </p>
+        ) : (
+          flags.map((f) => (
+            <p
+              key={f.code + f.text}
+              className={cn("text-sm leading-snug", f.level === "block" ? "text-destructive" : "text-foreground")}
+            >
+              {f.level === "block" ? "Block — " : "Warn — "}
+              {f.text}
+            </p>
+          ))
+        )}
         {scanError ? <p className="text-sm text-destructive">{scanError}</p> : null}
+        {brainNote ? <p className="text-xs text-muted-foreground">{brainNote}</p> : null}
         <Button className="w-full" onClick={onScan} disabled={scanning}>
           <ScanSearch />
-          {scanning ? "Reading plane…" : "Scan surface"}
+          {scanning ? "Reading zone…" : "Lock print zone"}
         </Button>
       </div>
 
       <div className="space-y-3">
         <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Pose</p>
-        <div
-          className="flex h-28 items-center justify-center rounded-lg bg-secondary"
-          style={{ perspective: "420px" }}
-        >
+        <div className="flex h-24 items-center justify-center rounded-lg bg-secondary" style={{ perspective: "420px" }}>
           <div
-            className="gizmo-plane size-16 rounded-sm bg-primary/20 shadow-[var(--shadow-border)]"
+            className="gizmo-plane size-14 rounded-sm bg-primary/20 shadow-[var(--shadow-border)]"
             style={{
               transform: `rotateX(${(-pose.pitchDeg).toFixed(1)}deg) rotateY(${pose.yawDeg.toFixed(1)}deg) rotateZ(${pose.rollDeg.toFixed(1)}deg)`,
               transition: "transform 150ms cubic-bezier(0.22, 1, 0.36, 1)",
@@ -135,9 +205,6 @@ export function BrainPanel({ onScan }: { onScan: () => void }) {
             </div>
           ))}
         </dl>
-        <p className="text-center text-xs tabular-nums text-muted-foreground">
-          Aspect {pose.aspect.toFixed(2)} · Fx {pose.foreshortenX.toFixed(2)} · Fy {pose.foreshortenY.toFixed(2)}
-        </p>
         <div className="grid grid-cols-3 gap-x-2 gap-y-1 font-sans text-[10px] tabular-nums text-faint">
           {matrix.map((n, i) => (
             <span key={i} className="text-right">
@@ -149,62 +216,25 @@ export function BrainPanel({ onScan }: { onScan: () => void }) {
 
       <div className="space-y-5">
         <Row label="Scale" value={`${Math.round(scale * 100)}%`}>
-          <Slider min={0.18} max={1.15} step={0.01} value={[scale]} onValueChange={(v) => setScale(v[0] ?? scale)} />
+          <Slider min={0.18} max={maxScale} step={0.01} value={[scale]} onValueChange={(v) => setScale(v[0] ?? scale)} />
         </Row>
-        <Row label="Ink" value={`${Math.round(opacity * 100)}%`}>
+        <Row label="Depth" value={`${Math.round(opacity * 100)}%`}>
           <Slider min={0.2} max={1} step={0.01} value={[opacity]} onValueChange={(v) => setOpacity(v[0] ?? opacity)} />
         </Row>
         <Row label="Light match" value={`${Math.round(lighting * 100)}%`}>
           <Slider min={0} max={1} step={0.01} value={[lighting]} onValueChange={(v) => setLighting(v[0] ?? lighting)} />
         </Row>
-        <Row label="Cylinder arc" value={`${Math.round((cylinderArc * 180) / Math.PI)}°`}>
-          <Slider
-            min={0.4}
-            max={2.2}
-            step={0.02}
-            value={[cylinderArc]}
-            onValueChange={(v) => setCylinderArc(v[0] ?? cylinderArc)}
-            disabled={wrap !== "cylinder"}
-          />
-        </Row>
-      </div>
-
-      <div className="space-y-2">
-        <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Wrap</p>
-        <div className="grid grid-cols-2 gap-2">
-          {(["plane", "cylinder"] as WrapMode[]).map((w) => (
-            <button
-              key={w}
-              type="button"
-              onClick={() => setWrap(w)}
-              className={cn(
-                "h-11 rounded-md text-sm capitalize shadow-[var(--shadow-border)]",
-                wrap === w ? "bg-primary text-primary-foreground" : "bg-secondary text-foreground",
-              )}
-            >
-              {w}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="space-y-2">
-        <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Blend</p>
-        <div className="flex flex-wrap gap-2">
-          {BLENDS.map((b) => (
-            <button
-              key={b.id}
-              type="button"
-              onClick={() => setBlend(b.id)}
-              className={cn(
-                "h-9 rounded-md px-3 text-xs shadow-[var(--shadow-border)]",
-                blend === b.id ? "bg-primary text-primary-foreground" : "bg-secondary text-foreground",
-              )}
-            >
-              {b.label}
-            </button>
-          ))}
-        </div>
+        {wrap === "cylinder" ? (
+          <Row label="Cylinder arc" value={`${Math.round((cylinderArc * 180) / Math.PI)}°`}>
+            <Slider
+              min={0.4}
+              max={2.2}
+              step={0.02}
+              value={[cylinderArc]}
+              onValueChange={(v) => setCylinderArc(v[0] ?? cylinderArc)}
+            />
+          </Row>
+        ) : null}
       </div>
 
       <div className="flex flex-col gap-2">
@@ -218,7 +248,7 @@ export function BrainPanel({ onScan }: { onScan: () => void }) {
           />
         </label>
         <label className="flex h-11 items-center justify-between gap-3 rounded-md bg-secondary px-3 text-sm">
-          Show plane
+          Show zone
           <input
             type="checkbox"
             checked={showGuides}

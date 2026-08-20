@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Download, SlidersHorizontal, Undo2, Redo2 } from "lucide-react";
+import { Download, SlidersHorizontal, Undo2, Redo2, Columns2, FileText, Check } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { StageCanvas, type StageHandle } from "@/components/studio/stage-canvas";
@@ -14,6 +14,11 @@ import { compressForEdit, compressForScan } from "@/lib/image";
 import { scanSurface } from "@/lib/scan";
 import { detectSurface } from "@/lib/detect";
 import { generateProduct, imagineEdit } from "@/lib/imagine";
+import { listClients, saveProof } from "@/lib/cc";
+import { downloadProofPdf } from "@/lib/pdf";
+import { inspectPlacement } from "@/lib/qc";
+import { METHODS } from "@/lib/methods";
+import type { JobKind } from "@/lib/cc";
 
 export function StudioApp() {
   const stageRef = useRef<StageHandle>(null);
@@ -38,6 +43,19 @@ export function StudioApp() {
   const redo = useStudio((s) => s.redo);
   const canUndo = useStudio((s) => s.canUndo());
   const canRedo = useStudio((s) => s.canRedo());
+  const clientId = useStudio((s) => s.clientId);
+  const jobKind = useStudio((s) => s.jobKind);
+  const jobRef = useStudio((s) => s.jobRef);
+  const compare = useStudio((s) => s.compare);
+  const setClientId = useStudio((s) => s.setClientId);
+  const setJobKind = useStudio((s) => s.setJobKind);
+  const setJobRef = useStudio((s) => s.setJobRef);
+  const setCompare = useStudio((s) => s.setCompare);
+  const method = useStudio((s) => s.method);
+  const mockup = useStudio((s) => s.mockup());
+  const scale = useStudio((s) => s.scale);
+  const quad = useStudio((s) => s.quad);
+  const invert = useStudio((s) => s.invert);
 
   const editSource =
     editTarget === "logo" && logo.src
@@ -78,7 +96,57 @@ export function StudioApp() {
 
   const onExport = async () => {
     await stageRef.current?.exportPng();
-    toast("Mockup saved");
+    toast("Proof PNG saved");
+  };
+
+  const onPdf = async () => {
+    const frames = await stageRef.current?.getFrames();
+    if (!frames) {
+      toast("Stage not ready");
+      return;
+    }
+    const client = listClients().find((c) => c.id === clientId);
+    const sku = "sku" in mockup ? mockup.sku : "CUSTOM";
+    const flags = inspectPlacement({
+      scale,
+      maxScale: "maxScale" in mockup ? mockup.maxScale : 0.9,
+      quad,
+      method,
+      allowed: "methods" in mockup ? mockup.methods : [method],
+      productTone: "tone" in mockup ? mockup.tone : "mid",
+      invert,
+    });
+    await downloadProofPdf({
+      client: client?.name ?? "Walk-in",
+      jobKind,
+      jobRef,
+      sku,
+      skuName: mockup.name,
+      method,
+      original: frames.original,
+      branded: frames.branded,
+      qc: flags.map((f) => f.text),
+      settings: `v1  ${method}  scale ${Math.round(scale * 100)}%  ${"substrate" in mockup ? mockup.substrate : ""}`,
+    });
+    toast("Branded PDF downloaded");
+  };
+
+  const onApprove = async () => {
+    const frames = await stageRef.current?.getFrames();
+    if (!frames) return;
+    const sku = "sku" in mockup ? mockup.sku : "CUSTOM";
+    saveProof({
+      clientId,
+      jobKind,
+      jobRef,
+      sku,
+      skuName: mockup.name,
+      method: METHODS[method].label,
+      branded: frames.branded.toDataURL("image/jpeg", 0.82),
+      settings: `scale ${Math.round(scale * 100)}%`,
+      status: "approved",
+    });
+    toast("Approved into Command Center");
   };
 
   const onGenerate = async () => {
@@ -208,35 +276,76 @@ export function StudioApp() {
       onDragOver={(e) => e.preventDefault()}
       onDrop={onDrop}
     >
-      <header className="flex items-center gap-2 border-b border-border px-3 py-2 sm:px-4">
-        <div className="min-w-0 flex-1">
-          <p className="font-serif text-xl italic leading-none text-foreground sm:text-2xl">IMPRINT</p>
-          <p className="hidden text-xs text-muted-foreground sm:block">Edit. Place. Print.</p>
+      <header className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-2 sm:px-4">
+        <div className="min-w-0">
+          <p className="font-sans text-lg font-semibold tracking-tight text-foreground">TPX</p>
+          <p className="hidden text-xs text-muted-foreground sm:block">TePee-X  ·  Command Center</p>
         </div>
-        <Button variant="ghost" size="icon" onClick={undo} disabled={!canUndo} aria-label="Undo">
-          <Undo2 />
-        </Button>
-        <Button variant="ghost" size="icon" onClick={redo} disabled={!canRedo} aria-label="Redo">
-          <Redo2 />
-        </Button>
-        <Button
-          variant="secondary"
-          size="sm"
-          className="lg:hidden"
-          onClick={() => setBrainOpen(true)}
+        <select
+          value={clientId}
+          onChange={(e) => setClientId(e.target.value)}
+          className="h-9 min-w-0 max-w-40 rounded-md bg-secondary px-2 text-xs text-foreground"
+          aria-label="Client"
         >
-          <SlidersHorizontal />
-          Brain
-        </Button>
-        {mode === "edit" ? (
-          <Button variant="secondary" size="sm" onClick={onImagineEdit}>
-            Imagine edit
+          {listClients().map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name}
+            </option>
+          ))}
+        </select>
+        <select
+          value={jobKind}
+          onChange={(e) => setJobKind(e.target.value as JobKind)}
+          className="h-9 rounded-md bg-secondary px-2 text-xs text-foreground"
+          aria-label="Job type"
+        >
+          <option value="quote">Quote</option>
+          <option value="sample">Sample</option>
+          <option value="order">Order</option>
+        </select>
+        <input
+          value={jobRef}
+          onChange={(e) => setJobRef(e.target.value)}
+          className="h-9 w-24 rounded-md bg-secondary px-2 text-xs tabular-nums text-foreground"
+          aria-label="Job reference"
+        />
+        <div className="ml-auto flex flex-wrap items-center gap-2">
+          <Button variant="ghost" size="icon" onClick={undo} disabled={!canUndo} aria-label="Undo">
+            <Undo2 />
           </Button>
-        ) : null}
-        <Button size="sm" onClick={onExport}>
-          <Download />
-          Export
-        </Button>
+          <Button variant="ghost" size="icon" onClick={redo} disabled={!canRedo} aria-label="Redo">
+            <Redo2 />
+          </Button>
+          <Button
+            variant={compare ? "default" : "secondary"}
+            size="sm"
+            onClick={() => setCompare(!compare)}
+          >
+            <Columns2 />
+            Split
+          </Button>
+          <Button variant="secondary" size="sm" className="lg:hidden" onClick={() => setBrainOpen(true)}>
+            <SlidersHorizontal />
+            Brain
+          </Button>
+          {mode === "edit" ? (
+            <Button variant="secondary" size="sm" onClick={onImagineEdit}>
+              Imagine edit
+            </Button>
+          ) : null}
+          <Button variant="secondary" size="sm" onClick={() => void onPdf()}>
+            <FileText />
+            PDF
+          </Button>
+          <Button variant="secondary" size="sm" onClick={() => void onApprove()}>
+            <Check />
+            Approve
+          </Button>
+          <Button size="sm" onClick={onExport}>
+            <Download />
+            PNG
+          </Button>
+        </div>
       </header>
 
       <div className={mode === "edit" ? "studio-shell studio-shell-edit min-h-0 flex-1" : "studio-shell min-h-0 flex-1"}>

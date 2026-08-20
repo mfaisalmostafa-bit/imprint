@@ -4,7 +4,7 @@ import { PreviewHostBridge } from "@/components/preview-host-bridge";
 import { Toaster } from "sonner";
 import appCss from "../styles.css?url";
 
-const APP_NAME = "IMPRINT";
+const APP_NAME = "TPX Mockup";
 
 export const Route = createRootRoute({
   head: () => ({
@@ -12,11 +12,11 @@ export const Route = createRootRoute({
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
       { title: APP_NAME },
-      { name: "theme-color", content: "#09090b" },
+      { name: "theme-color", content: "#0B1F3A" },
       {
         name: "description",
         content:
-          "Drop a logo. Crop it. IMPRINT finds the printable plane and warps the mark to the real camera angle — or Imagine a blank product from a sentence.",
+          "TePee-X Command Center mockups — laser, sublimation, UV DTF, embroidery. Print-true proofs for quotes, samples, and orders.",
       },
     ],
     links: [
@@ -26,7 +26,7 @@ export const Route = createRootRoute({
       { rel: "preconnect", href: "https://fonts.gstatic.com", crossOrigin: "anonymous" },
       {
         rel: "stylesheet",
-        href: "https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&family=Instrument+Serif:ital@0;1&display=swap",
+        href: "https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap",
       },
       { rel: "manifest", href: "/__grok/manifest.webmanifest" },
       { rel: "apple-touch-icon", href: "/__grok/icon-180.png" },

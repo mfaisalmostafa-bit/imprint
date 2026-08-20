@@ -18,6 +18,9 @@ import {
 } from "./mockups";
 import type { ScanResult } from "./scan";
 import type { DetectResult } from "./detect";
+import type { MethodId } from "./methods";
+import type { Treatment } from "./treat";
+import type { JobKind } from "./cc";
 
 export type LogoAsset = {
   id: string;
@@ -47,6 +50,13 @@ type Snapshot = {
   cylinderArc: number;
   lighting: number;
   invert: boolean;
+  method: MethodId;
+  treatment: Treatment;
+  spotId: string;
+  clientId: string;
+  jobKind: JobKind;
+  jobRef: string;
+  compare: boolean;
 };
 
 type StudioState = {
@@ -82,6 +92,13 @@ type StudioState = {
   imaginePrompt: string;
   history: Snapshot[];
   historyIndex: number;
+  method: MethodId;
+  treatment: Treatment;
+  spotId: string;
+  clientId: string;
+  jobKind: JobKind;
+  jobRef: string;
+  compare: boolean;
 
   mockup: () => Mockup | CustomView;
   productSrc: () => string;
@@ -117,6 +134,13 @@ type StudioState = {
   redo: () => void;
   canUndo: () => boolean;
   canRedo: () => boolean;
+  setMethod: (m: MethodId) => void;
+  setTreatment: (t: Treatment) => void;
+  setSpotId: (id: string) => void;
+  setClientId: (id: string) => void;
+  setJobKind: (k: JobKind) => void;
+  setJobRef: (s: string) => void;
+  setCompare: (v: boolean) => void;
 };
 
 export type CustomView = {
@@ -133,6 +157,13 @@ export type CustomView = {
   surface: string;
   material: string;
   scale: number;
+  sku: string;
+  methods: MethodId[];
+  defaultMethod: MethodId;
+  maxScale: number;
+  printWmm: number;
+  printHmm: number;
+  substrate: string;
 };
 
 const first = MOCKUPS[0]!;
@@ -155,6 +186,13 @@ function takeSnapshot(s: StudioState): Snapshot {
     cylinderArc: s.cylinderArc,
     lighting: s.lighting,
     invert: s.invert,
+    method: s.method,
+    treatment: s.treatment,
+    spotId: s.spotId,
+    clientId: s.clientId,
+    jobKind: s.jobKind,
+    jobRef: s.jobRef,
+    compare: s.compare,
   };
 }
 
@@ -188,6 +226,13 @@ export const useStudio = create<StudioState>((set, get) => ({
   cylinderArc: first.cylinderArc,
   lighting: 0.55,
   invert: first.invert,
+  method: first.defaultMethod,
+  treatment: "knockout",
+  spotId: "navy",
+  clientId: "c-nile",
+  jobKind: "quote",
+  jobRef: "Q-2408-01",
+  compare: false,
   showGuides: true,
   scanning: false,
   generating: false,
@@ -222,6 +267,13 @@ export const useStudio = create<StudioState>((set, get) => ({
         surface: s.surfaceLabel,
         material: s.material,
         scale: s.scale,
+        sku: "CUSTOM",
+        methods: ["laser_engrave", "uv_dtf", "sublimation", "pad_print"],
+        defaultMethod: s.method,
+        maxScale: 0.9,
+        printWmm: 80,
+        printHmm: 80,
+        substrate: s.material,
       };
     }
     return MOCKUPS.find((m) => m.id === s.mockupId) ?? first;
@@ -252,6 +304,7 @@ export const useStudio = create<StudioState>((set, get) => ({
       offsetX: 0,
       offsetY: apparelOffset(m.id),
       scale: m.scale,
+      method: m.defaultMethod,
       mode: "studio",
     });
   },
@@ -279,6 +332,7 @@ export const useStudio = create<StudioState>((set, get) => ({
       cylinderArc: 1.2,
       blend: "multiply",
       invert: false,
+      method: "uv_dtf",
       surfaceLabel: "Unscanned plane",
       material: "unknown",
       confidence: null,
@@ -325,6 +379,7 @@ export const useStudio = create<StudioState>((set, get) => ({
       cylinderArc: m.cylinderArc,
       invert: m.invert,
       scale: m.scale,
+      method: m.defaultMethod,
       offsetX: 0,
       offsetY: apparelOffset(m.id),
     });
@@ -399,4 +454,16 @@ export const useStudio = create<StudioState>((set, get) => ({
   },
   canUndo: () => get().historyIndex >= 0,
   canRedo: () => get().historyIndex + 1 < get().history.length,
+  setMethod: (m) => {
+    const sku = get().mockup();
+    const allowed = "methods" in sku ? sku.methods : ([m] as MethodId[]);
+    if (!allowed.includes(m)) return;
+    set({ method: m });
+  },
+  setTreatment: (t) => set({ treatment: t }),
+  setSpotId: (id) => set({ spotId: id }),
+  setClientId: (id) => set({ clientId: id }),
+  setJobKind: (k) => set({ jobKind: k }),
+  setJobRef: (s) => set({ jobRef: s }),
+  setCompare: (v) => set({ compare: v }),
 }));

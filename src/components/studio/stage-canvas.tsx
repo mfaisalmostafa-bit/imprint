@@ -2,6 +2,9 @@ import { useCallback, useEffect, useRef, useState, forwardRef, useImperativeHand
 import { useStudio } from "@/lib/store";
 import { loadImage, rasterizeLogo, renderWordmark } from "@/lib/image";
 import { applySurfaceLighting, finishPrint, warpImageToQuad } from "@/lib/warp";
+import { compositeDecoration } from "@/lib/etch";
+import { treatLogo } from "@/lib/render";
+import { SPOT_SWATCHES } from "@/lib/treat";
 import {
   clamp,
   cloneQuad,
@@ -13,6 +16,7 @@ import { cn } from "@/lib/utils";
 
 export type StageHandle = {
   exportPng: () => Promise<void>;
+  getFrames: () => Promise<{ original: HTMLCanvasElement; branded: HTMLCanvasElement } | null>;
 };
 
 function capSize(w: number, h: number, max = 1600) {
@@ -34,9 +38,7 @@ export const StageCanvas = forwardRef<StageHandle>(function StageCanvas(_, ref) 
   const scale = useStudio((s) => s.scale);
   const offsetX = useStudio((s) => s.offsetX);
   const offsetY = useStudio((s) => s.offsetY);
-  const setOffset = useStudio((s) => s.setOffset);
   const opacity = useStudio((s) => s.opacity);
-  const blend = useStudio((s) => s.blend);
   const wrap = useStudio((s) => s.wrap);
   const cylinderArc = useStudio((s) => s.cylinderArc);
   const lighting = useStudio((s) => s.lighting);
@@ -46,6 +48,12 @@ export const StageCanvas = forwardRef<StageHandle>(function StageCanvas(_, ref) 
   const dragging = useStudio((s) => s.dragging);
   const setQuad = useStudio((s) => s.setQuad);
   const setDragging = useStudio((s) => s.setDragging);
+  const setOffset = useStudio((s) => s.setOffset);
+  const method = useStudio((s) => s.method);
+  const treatment = useStudio((s) => s.treatment);
+  const spotId = useStudio((s) => s.spotId);
+  const compare = useStudio((s) => s.compare);
+  const material = useStudio((s) => s.material);
 
   const [fitted, setFitted] = useState({ w: 0, h: 0 });
   const [ready, setReady] = useState(false);
@@ -93,15 +101,22 @@ export const StageCanvas = forwardRef<StageHandle>(function StageCanvas(_, ref) 
         finishPrint(layer, dest, wrap, cylinderArc);
       }
 
-      ctx.save();
-      ctx.globalAlpha = opacity;
-      ctx.globalCompositeOperation = blend;
-      ctx.drawImage(layer, 0, 0);
-      ctx.restore();
+      compositeDecoration(ctx, product, layer, dest, method, material, opacity);
+
+      if (compare) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(0, 0, w / 2, h);
+        ctx.clip();
+        ctx.drawImage(product, 0, 0, w, h);
+        ctx.restore();
+        ctx.fillStyle = "rgb(232, 93, 4)";
+        ctx.fillRect(w / 2 - 1, 0, 2, h);
+      }
 
       if (withGuides) {
         ctx.save();
-        ctx.strokeStyle = "rgba(200, 204, 212, 0.85)";
+        ctx.strokeStyle = "rgba(232, 93, 4, 0.75)";
         ctx.lineWidth = Math.max(1.5, w / 700);
         ctx.setLineDash([w / 80, w / 90]);
         ctx.beginPath();
@@ -120,7 +135,7 @@ export const StageCanvas = forwardRef<StageHandle>(function StageCanvas(_, ref) 
         ctx.restore();
       }
     },
-    [quad, scale, offsetX, offsetY, opacity, blend, wrap, cylinderArc, lighting],
+    [quad, scale, offsetX, offsetY, opacity, wrap, cylinderArc, lighting, method, material, compare],
   );
 
   useImperativeHandle(
@@ -136,13 +151,29 @@ export const StageCanvas = forwardRef<StageHandle>(function StageCanvas(_, ref) 
             const url = URL.createObjectURL(blob);
             const a = document.createElement("a");
             a.href = url;
-            a.download = "imprint-mockup.png";
+            a.download = "tpx-proof.png";
             a.click();
             URL.revokeObjectURL(url);
             resolve();
           }, "image/png");
         });
         paint(showGuides, dragging ? "live" : "full");
+      },
+      getFrames: async () => {
+        const product = productRef.current;
+        const canvas = canvasRef.current;
+        if (!product || !canvas) return null;
+        paint(false, "full");
+        const branded = document.createElement("canvas");
+        branded.width = canvas.width;
+        branded.height = canvas.height;
+        branded.getContext("2d")?.drawImage(canvas, 0, 0);
+        const original = document.createElement("canvas");
+        original.width = canvas.width;
+        original.height = canvas.height;
+        original.getContext("2d")?.drawImage(product, 0, 0, canvas.width, canvas.height);
+        paint(showGuides, "full");
+        return { original, branded };
       },
     }),
     [paint, showGuides, dragging],
@@ -172,22 +203,27 @@ export const StageCanvas = forwardRef<StageHandle>(function StageCanvas(_, ref) 
   useEffect(() => {
     let cancelled = false;
     const run = async () => {
+      const spot = SPOT_SWATCHES.find((s) => s.id === spotId)?.rgb ?? [11, 31, 58];
       if (logo.kind === "wordmark") {
-        logoRef.current = renderWordmark(wordmark, invert);
+        const canvas = renderWordmark(wordmark, invert);
+        treatLogo(canvas, treatment, spot);
+        logoRef.current = canvas;
         if (!cancelled) setLogoTick((n) => n + 1);
         return;
       }
       if (!logo.src) return;
       const img = await loadImage(logo.src);
       if (cancelled) return;
-      logoRef.current = rasterizeLogo(img, invert);
+      const canvas = rasterizeLogo(img, invert);
+      treatLogo(canvas, treatment, spot);
+      logoRef.current = canvas;
       setLogoTick((n) => n + 1);
     };
     run().catch(() => undefined);
     return () => {
       cancelled = true;
     };
-  }, [logo, wordmark, invert]);
+  }, [logo, wordmark, invert, treatment, spotId]);
 
   useEffect(() => {
     if (!ready) return;
@@ -301,23 +337,10 @@ export const StageCanvas = forwardRef<StageHandle>(function StageCanvas(_, ref) 
         {(scanning || generating) && (
           <div className="pointer-events-none absolute inset-0 overflow-hidden">
             <div className="absolute inset-0 bg-background/20" />
-            <div
-              className="absolute inset-x-0 top-0 h-px bg-primary scan-sweep"
-              style={{ boxShadow: "0 0 24px 2px color-mix(in oklab, var(--color-primary) 50%, transparent)" }}
-            />
-            <div
-              className="absolute inset-0 opacity-30"
-              style={{
-                backgroundImage:
-                  "linear-gradient(to right, rgb(200 204 212 / 0.18) 1px, transparent 1px), linear-gradient(to bottom, rgb(200 204 212 / 0.18) 1px, transparent 1px)",
-                backgroundSize: "12% 12%",
-              }}
-            />
+            <div className="absolute inset-x-0 top-0 h-px bg-primary scan-sweep" />
           </div>
         )}
-        {!ready && (
-          <div className="absolute inset-0 animate-pulse bg-secondary" />
-        )}
+        {!ready && <div className="absolute inset-0 animate-pulse bg-secondary" />}
       </div>
       <p
         className={cn(
@@ -325,7 +348,7 @@ export const StageCanvas = forwardRef<StageHandle>(function StageCanvas(_, ref) 
           !showGuides && "hidden",
         )}
       >
-        Drag the mark · corners lock the plane
+        {compare ? "SKU  ·  branded" : "Drag the mark · corners lock the print zone"}
       </p>
     </div>
   );

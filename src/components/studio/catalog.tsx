@@ -37,7 +37,7 @@ export function Catalog({ layout }: { layout: "side" | "row" }) {
       )}
     >
       <p className={cn("text-xs font-medium uppercase tracking-wider text-muted-foreground", layout === "row" && "hidden")}>
-        Surfaces
+        SKUs
       </p>
       <input
         ref={fileRef}
@@ -88,9 +88,10 @@ export function Catalog({ layout }: { layout: "side" | "row" }) {
           <img
             src={m.src}
             alt={m.name}
-            className="h-20 w-full object-cover outline outline-1 -outline-offset-1 outline-foreground/10"
+            className="h-24 w-full object-cover outline outline-1 -outline-offset-1 outline-foreground/10"
           />
-          <span className="absolute inset-x-0 bottom-0 bg-background/80 px-2 py-1 text-[11px] text-foreground">
+          <span className="absolute inset-x-0 bottom-0 bg-background/80 px-2 py-1 text-[11px] leading-tight text-foreground">
+            <span className="block font-medium tabular-nums text-muted-foreground">{m.sku}</span>
             {m.name}
           </span>
         </button>

@@ -1,8 +1,19 @@
-# IMPRINT
+# TPX Mockup
 
-Smart logo mockup studio — crop, tone, Imagine a blank product, lock the printable plane, warp the mark to the real camera angle.
+TePee-X Command Center proofs. A salesperson picks a client, a SKU, and a logo — the generator locks the print zone and renders the **quoted decoration method**, not a Photoshop blend.
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-lightgrey.svg)](LICENSE)
+## Decoration matrix
+
+A wrong method is a quoting error. Each SKU only offers what production can actually run:
+
+| Method | Reads as |
+| --- | --- |
+| Laser engrave | Substrate reveal + inner shadow (pens, flasks, USB, awards) |
+| Sublimation | Dye in the coat (mugs) |
+| UV DTF | Film on the surface with a slight raise |
+| Pad / screen | Spot colour, slightly inset |
+| Embroidery | Satin direction on textile |
+| Deboss / foil | Recess or metallic stamp |
 
 ## Run
 
@@ -11,29 +22,9 @@ npm install
 npm run dev
 ```
 
-Upload a mark or type a wordmark. Crop / rotate / tone it. Pick a catalog surface or Imagine a product from a sentence. **Scan surface** locks the plane (local silhouette brain, then Grok vision). Drag the mark or the corners. Export PNG.
+Workflow: client → quote/sample/order ref → SKU → logo → method (locked) → QC → Approve into CC → branded PDF (navy / orange).
 
-Vision scan and Imagine use the xAI API when `XAI_API_KEY` is set. Catalog placement and the local plane lock still work without it.
-
-## Source map
-
-| Path | What it is |
-| --- | --- |
-| `src/lib/geometry.ts` | Homography, convex quads, vanishing-point yaw/pitch/roll |
-| `src/lib/warp.ts` | Perspective mesh + cylinder wrap + lighting + print finish |
-| `src/lib/detect.ts` | Client-side printable-plane lock from silhouette + falloff |
-| `src/lib/scan.ts` | Grok vision scan: product photo → printable quad |
-| `src/lib/edit.ts` | Crop, rotate, flip, tone, filters |
-| `src/lib/imagine.ts` | Product generation + natural-language image edit |
-| `src/lib/mockups.ts` | Catalog of promotional surfaces |
-| `src/lib/store.ts` | Studio state + undo |
-| `src/components/studio/` | Stage, editor, crop overlay, catalog, brain, tools |
-| `public/mockups/` | Product photographs |
-| `public/logos/` | Sample marks |
-
-Stack: React 19, TanStack Start, Tailwind v4, Zustand.
-
-Keyboard: `C` crop, `R` rotate, `T` tone, `S` scan, `E` export, `Esc` back, `⌘Z` undo.
+`XAI_API_KEY` enables vision zone-lock and Imagine product stills. Catalog SKUs and the local silhouette lock work without it.
 
 ## License
 

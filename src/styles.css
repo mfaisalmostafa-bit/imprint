@@ -1,31 +1,33 @@
 @import "tailwindcss";
 
 @theme {
-  --font-sans: "Figtree", ui-sans-serif, system-ui, sans-serif;
-  --font-serif: "Instrument Serif", ui-serif, Georgia, serif;
-  --font-display: "Instrument Serif", ui-serif, Georgia, serif;
+  --font-sans: "Montserrat", ui-sans-serif, system-ui, sans-serif;
+  --font-serif: "Montserrat", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Montserrat", ui-sans-serif, system-ui, sans-serif;
 
-  --color-background: #09090b;
+  --color-background: #08111c;
   --color-foreground: #f4f1ea;
-  --color-card: #121214;
+  --color-card: #0b1f3a;
   --color-card-foreground: #f4f1ea;
-  --color-popover: #121214;
+  --color-popover: #0b1f3a;
   --color-popover-foreground: #f4f1ea;
-  --color-primary: #c8ccd4;
-  --color-primary-foreground: #09090b;
-  --color-secondary: #1a1a1e;
+  --color-primary: #e85d04;
+  --color-primary-foreground: #fff7f0;
+  --color-secondary: #12263f;
   --color-secondary-foreground: #f4f1ea;
-  --color-muted: #1a1a1e;
-  --color-muted-foreground: #8c8a84;
-  --color-accent: #1a1a1e;
+  --color-muted: #12263f;
+  --color-muted-foreground: #8b93a1;
+  --color-accent: #12263f;
   --color-accent-foreground: #f4f1ea;
   --color-destructive: #c45c4a;
-  --color-border: #2a2a2e;
-  --color-input: #2a2a2e;
-  --color-ring: #c8ccd4;
+  --color-border: #1d334f;
+  --color-input: #1d334f;
+  --color-ring: #e85d04;
   --color-silver: #c8ccd4;
-  --color-faint: #5c5a56;
+  --color-faint: #5c6a7a;
   --color-ok: #7d9a78;
+  --color-navy: #0b1f3a;
+  --color-orange: #e85d04;
 
   --radius-xs: 4px;
   --radius-sm: 8px;
