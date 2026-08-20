@@ -1,5 +1,6 @@
 import { MOCKUPS } from "@/lib/mockups";
 import { useStudio } from "@/lib/store";
+import { detectSurface } from "@/lib/detect";
 import { cn } from "@/lib/utils";
 import { Camera } from "lucide-react";
 import { useRef } from "react";
@@ -11,12 +12,18 @@ export function Catalog({ layout }: { layout: "side" | "row" }) {
   const selectMockup = useStudio((s) => s.selectMockup);
   const selectCustom = useStudio((s) => s.selectCustom);
   const setCustomProduct = useStudio((s) => s.setCustomProduct);
+  const applyScan = useStudio((s) => s.applyScan);
+  const pushHistory = useStudio((s) => s.pushHistory);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const onFile = (file: File | undefined) => {
     if (!file || !file.type.startsWith("image/")) return;
     const url = URL.createObjectURL(file);
+    pushHistory();
     setCustomProduct(url, file.name.replace(/\.[^.]+$/, "") || "Your product");
+    detectSurface(url)
+      .then(applyScan)
+      .catch(() => undefined);
   };
 
   const itemClass = layout === "row" ? "w-28 shrink-0" : "w-full";

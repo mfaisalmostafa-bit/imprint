@@ -2,6 +2,7 @@ import {
   applyMat3,
   cylinderSrcU,
   homography,
+  invertMat3,
   type Point,
   type Quad,
   UNIT_QUAD,
@@ -175,6 +176,57 @@ export function applySurfaceLighting(
     ld[i + 2] = Math.min(255, ld[i + 2]! * f);
   }
   lctx.putImageData(logo, 0, 0);
+}
+
+/** Cylinder shade + print-edge feather using inverse homography UVs. */
+export function finishPrint(
+  layer: HTMLCanvasElement,
+  destQuad: Quad,
+  wrap: "plane" | "cylinder",
+  cylinderArc: number,
+) {
+  const w = layer.width;
+  const h = layer.height;
+  const ctx = layer.getContext("2d");
+  if (!ctx) return;
+  let Hinv;
+  try {
+    Hinv = invertMat3(homography(UNIT_QUAD, destQuad));
+  } catch {
+    return;
+  }
+  const img = ctx.getImageData(0, 0, w, h);
+  const d = img.data;
+  const xs = destQuad.map((p) => p.x);
+  const ys = destQuad.map((p) => p.y);
+  const minX = Math.max(0, Math.floor(Math.min(...xs)) - 2);
+  const maxX = Math.min(w, Math.ceil(Math.max(...xs)) + 2);
+  const minY = Math.max(0, Math.floor(Math.min(...ys)) - 2);
+  const maxY = Math.min(h, Math.ceil(Math.max(...ys)) + 2);
+  const arc = Math.max(0.2, cylinderArc);
+
+  for (let y = minY; y < maxY; y++) {
+    for (let x = minX; x < maxX; x++) {
+      const i = (y * w + x) * 4;
+      const a = d[i + 3]!;
+      if (a < 4) continue;
+      const uv = applyMat3(Hinv, x, y);
+      if (uv.x < -0.02 || uv.x > 1.02 || uv.y < -0.02 || uv.y > 1.02) continue;
+      const edgeU = Math.min(uv.x, 1 - uv.x);
+      const edgeV = Math.min(uv.y, 1 - uv.y);
+      const feather = Math.max(0, Math.min(1, Math.min(edgeU, edgeV) / 0.045));
+      let shade = 1;
+      if (wrap === "cylinder") {
+        const xN = (uv.x - 0.5) * 2;
+        shade = 0.55 + 0.45 * Math.cos(xN * (arc / 2));
+      }
+      d[i] = Math.min(255, d[i]! * shade);
+      d[i + 1] = Math.min(255, d[i + 1]! * shade);
+      d[i + 2] = Math.min(255, d[i + 2]! * shade);
+      d[i + 3] = a * (0.35 + 0.65 * feather);
+    }
+  }
+  ctx.putImageData(img, 0, 0);
 }
 
 export function invertImageData(data: ImageData) {

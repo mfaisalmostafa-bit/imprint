@@ -1,11 +1,10 @@
 import { useCallback, useEffect, useRef, useState, forwardRef, useImperativeHandle } from "react";
 import { useStudio } from "@/lib/store";
 import { loadImage, rasterizeLogo, renderWordmark } from "@/lib/image";
-import { applySurfaceLighting, warpImageToQuad } from "@/lib/warp";
+import { applySurfaceLighting, finishPrint, warpImageToQuad } from "@/lib/warp";
 import {
   clamp,
   cloneQuad,
-  homography,
   insetLogoQuad,
   isConvexQuad,
   type Quad,
@@ -16,7 +15,7 @@ export type StageHandle = {
   exportPng: () => Promise<void>;
 };
 
-function capSize(w: number, h: number, max = 1400) {
+function capSize(w: number, h: number, max = 1600) {
   const s = Math.min(1, max / Math.max(w, h));
   return { w: Math.round(w * s), h: Math.round(h * s) };
 }
@@ -35,6 +34,7 @@ export const StageCanvas = forwardRef<StageHandle>(function StageCanvas(_, ref) 
   const scale = useStudio((s) => s.scale);
   const offsetX = useStudio((s) => s.offsetX);
   const offsetY = useStudio((s) => s.offsetY);
+  const setOffset = useStudio((s) => s.setOffset);
   const opacity = useStudio((s) => s.opacity);
   const blend = useStudio((s) => s.blend);
   const wrap = useStudio((s) => s.wrap);
@@ -42,6 +42,7 @@ export const StageCanvas = forwardRef<StageHandle>(function StageCanvas(_, ref) 
   const lighting = useStudio((s) => s.lighting);
   const showGuides = useStudio((s) => s.showGuides);
   const scanning = useStudio((s) => s.scanning);
+  const generating = useStudio((s) => s.generating);
   const dragging = useStudio((s) => s.dragging);
   const setQuad = useStudio((s) => s.setQuad);
   const setDragging = useStudio((s) => s.setDragging);
@@ -50,6 +51,7 @@ export const StageCanvas = forwardRef<StageHandle>(function StageCanvas(_, ref) 
   const [ready, setReady] = useState(false);
   const [logoTick, setLogoTick] = useState(0);
   const dragIndex = useRef<number>(-1);
+  const moveDrag = useRef<{ x: number; y: number; ox: number; oy: number } | null>(null);
 
   const paint = useCallback(
     (withGuides: boolean, quality: "live" | "full") => {
@@ -88,6 +90,7 @@ export const StageCanvas = forwardRef<StageHandle>(function StageCanvas(_, ref) 
       });
       if (quality === "full") {
         applySurfaceLighting(layer, product, lighting);
+        finishPrint(layer, dest, wrap, cylinderArc);
       }
 
       ctx.save();
@@ -210,24 +213,47 @@ export const StageCanvas = forwardRef<StageHandle>(function StageCanvas(_, ref) 
   }, [ready, productSrc]);
 
   const onPointerMove = (e: React.PointerEvent) => {
-    if (dragIndex.current < 0 || !wrapRef.current) return;
+    if (!wrapRef.current) return;
     const rect = wrapRef.current.getBoundingClientRect();
     const x = clamp((e.clientX - rect.left) / rect.width, 0, 1);
     const y = clamp((e.clientY - rect.top) / rect.height, 0, 1);
-    const next = cloneQuad(quad);
-    next[dragIndex.current] = { x, y };
-    if (isConvexQuad(next)) setQuad(next);
+    if (dragIndex.current >= 0) {
+      const next = cloneQuad(quad);
+      next[dragIndex.current] = { x, y };
+      if (isConvexQuad(next)) setQuad(next);
+      return;
+    }
+    if (moveDrag.current) {
+      const dx = (x - moveDrag.current.x) * 1.6;
+      const dy = (y - moveDrag.current.y) * 1.6;
+      setOffset(
+        clamp(moveDrag.current.ox + dx, -0.4, 0.4),
+        clamp(moveDrag.current.oy + dy, -0.4, 0.4),
+      );
+    }
   };
 
   const endDrag = (e: React.PointerEvent) => {
-    if (dragIndex.current < 0) return;
+    if (dragIndex.current < 0 && !moveDrag.current) return;
     dragIndex.current = -1;
+    moveDrag.current = null;
     setDragging(false);
     try {
       e.currentTarget.releasePointerCapture(e.pointerId);
     } catch {
       /* already released */
     }
+  };
+
+  const startMove = (e: React.PointerEvent) => {
+    if (dragIndex.current >= 0) return;
+    const rect = wrapRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const x = clamp((e.clientX - rect.left) / rect.width, 0, 1);
+    const y = clamp((e.clientY - rect.top) / rect.height, 0, 1);
+    moveDrag.current = { x, y, ox: offsetX, oy: offsetY };
+    setDragging(true);
+    e.currentTarget.setPointerCapture(e.pointerId);
   };
 
   const labels = ["TL", "TR", "BR", "BL"];
@@ -243,6 +269,7 @@ export const StageCanvas = forwardRef<StageHandle>(function StageCanvas(_, ref) 
           maxWidth: "100%",
           maxHeight: "100%",
         }}
+        onPointerDown={startMove}
         onPointerMove={onPointerMove}
         onPointerUp={endDrag}
         onPointerCancel={endDrag}
@@ -271,7 +298,7 @@ export const StageCanvas = forwardRef<StageHandle>(function StageCanvas(_, ref) 
               {labels[i]}
             </button>
           ))}
-        {scanning && (
+        {(scanning || generating) && (
           <div className="pointer-events-none absolute inset-0 overflow-hidden">
             <div className="absolute inset-0 bg-background/20" />
             <div
@@ -298,7 +325,7 @@ export const StageCanvas = forwardRef<StageHandle>(function StageCanvas(_, ref) 
           !showGuides && "hidden",
         )}
       >
-        Drag corners to match the plane
+        Drag the mark · corners lock the plane
       </p>
     </div>
   );

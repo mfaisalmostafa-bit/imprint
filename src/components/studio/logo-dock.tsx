@@ -10,11 +10,13 @@ export function LogoDock() {
   const invert = useStudio((s) => s.invert);
   const setLogo = useStudio((s) => s.setLogo);
   const setWordmark = useStudio((s) => s.setWordmark);
+  const pushHistory = useStudio((s) => s.pushHistory);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const onFile = (file: File | undefined) => {
     if (!file) return;
     const url = URL.createObjectURL(file);
+    pushHistory();
     setLogo({
       id: "upload",
       name: file.name.replace(/\.[^.]+$/, "") || "Logo",

@@ -16,7 +16,7 @@ export const Route = createRootRoute({
       {
         name: "description",
         content:
-          "Drop a logo. IMPRINT finds the printable plane on promotional products and warps the mark to the real camera angle.",
+          "Drop a logo. Crop it. IMPRINT finds the printable plane and warps the mark to the real camera angle — or Imagine a blank product from a sentence.",
       },
     ],
     links: [

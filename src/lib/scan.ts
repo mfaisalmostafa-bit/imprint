@@ -35,11 +35,11 @@ export type ScanResult = {
 
 export type ScanFailure = { ok: false; error: string };
 
-const SCAN_PROMPT = `You are a print-placement engineer. Analyze this product photo for a logo mockup.
+const SCAN_PROMPT = `You are a print-placement engineer locking a logo onto a product photograph.
 
-Find the primary printable/brandable surface (shirt chest, mug wall, box face, billboard face, bag panel, cap front, notebook cover, etc.).
+Find the primary printable/brandable surface (shirt chest — not sleeves or collar; mug/cup front wall — not the handle; box facing camera; billboard face; bag panel; cap front crown; notebook cover).
 
-Return ONLY JSON with this shape:
+Return ONLY JSON:
 {
   "surface": "short name of the plane",
   "material": "cotton|fleece|ceramic|canvas|cardboard|paper|metal|cloth|vinyl|other",
@@ -53,15 +53,18 @@ Return ONLY JSON with this shape:
   "confidence": 0-1,
   "surfaceTone": "light"|"mid"|"dark",
   "suggestedBlend": "multiply"|"screen"|"overlay"|"source-over",
-  "notes": "one sentence about the camera angle and why this plane"
+  "notes": "one sentence: camera yaw/pitch and why this plane is print-safe"
 }
 
-quad order is top-left, top-right, bottom-right, bottom-left of the printable area.
-Coordinates are normalized image fractions, origin top-left.
-The quad must be convex and sit ON the product, not the background or a person's skin.
-Prefer a conservative inset rather than spilling off the surface.
-For cylindrical objects (mugs, cups, bottles) wrap="cylinder" and the quad is the visible front wall.
-For shirts, place on the chest panel, not the entire garment.`;
+Rules:
+- quad order: top-left, top-right, bottom-right, bottom-left of the PRINTABLE area.
+- Coordinates are normalized image fractions, origin top-left.
+- Quad must be convex and sit ON the product, never background, skin, hands, or handles.
+- Conservative inset (~6–10%) so the mark does not spill off the surface or into seams.
+- Shirts: chest panel only, slightly above garment center (print shop placement).
+- Cylindrical objects: wrap="cylinder"; quad is the visible front wall between the silhouette edges.
+- Respect perspective: if the surface recedes, the quad must recede with it (foreshortened far edge).
+- Ignore existing logos if any — lock the plane they sit on.`;
 
 function extractJson(text: string): unknown {
   const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);

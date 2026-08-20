@@ -197,6 +197,19 @@ export type Pose = {
   area: number;
 };
 
+function lineIntersect(
+  a1: Point,
+  a2: Point,
+  b1: Point,
+  b2: Point,
+): Point | null {
+  const d = (a1.x - a2.x) * (b1.y - b2.y) - (a1.y - a2.y) * (b1.x - b2.x);
+  if (Math.abs(d) < 1e-9) return null;
+  const t =
+    ((a1.x - b1.x) * (b1.y - b2.y) - (a1.y - b1.y) * (b1.x - b2.x)) / d;
+  return { x: a1.x + t * (a2.x - a1.x), y: a1.y + t * (a2.y - a1.y) };
+}
+
 /** Estimate camera-relative plane pose from a normalized (or pixel) quad. */
 export function poseFromQuad(q: Quad): Pose {
   const [tl, tr, br, bl] = q;
@@ -212,10 +225,24 @@ export function poseFromQuad(q: Quad): Pose {
   const roll = Math.atan2(top.y + bot.y, top.x + bot.x);
 
   const lr = (leftLen - rightLen) / ((leftLen + rightLen) / 2);
-  const yaw = Math.asin(clamp(lr * 0.55, -1, 1));
+  let yaw = Math.asin(clamp(lr * 0.55, -1, 1));
+  const vpH = lineIntersect(tl, tr, bl, br);
+  if (vpH) {
+    const cx = (tl.x + tr.x + br.x + bl.x) / 4;
+    const dx = vpH.x - cx;
+    const vpYaw = Math.atan(clamp(dx * 1.6, -4, 4));
+    yaw = yaw * 0.4 + vpYaw * 0.6;
+  }
 
   const tb = (botLen - topLen) / ((topLen + botLen) / 2);
-  const pitch = Math.asin(clamp(tb * 0.55, -1, 1));
+  let pitch = Math.asin(clamp(tb * 0.55, -1, 1));
+  const vpV = lineIntersect(tl, bl, tr, br);
+  if (vpV) {
+    const cy = (tl.y + tr.y + br.y + bl.y) / 4;
+    const dy = vpV.y - cy;
+    const vpPitch = Math.atan(clamp(dy * 1.4, -4, 4));
+    pitch = pitch * 0.4 + vpPitch * 0.6;
+  }
 
   const width = (topLen + botLen) / 2;
   const height = (leftLen + rightLen) / 2;

@@ -81,3 +81,10 @@ export async function compressForScan(
   ctx.drawImage(img, 0, 0, w, h);
   return canvas.toDataURL("image/jpeg", 0.82);
 }
+
+export async function compressForEdit(
+  src: string,
+  maxEdge = 1024,
+): Promise<string> {
+  return compressForScan(src, maxEdge);
+}

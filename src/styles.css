@@ -111,15 +111,58 @@
 .studio-shell {
   display: grid;
   grid-template-columns: 1fr;
-  grid-template-rows: minmax(0, 1fr) auto auto;
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  grid-template-areas:
+    "rail"
+    "stage"
+    "dock"
+    "film";
   min-width: 0;
   width: 100%;
   overflow: hidden;
 }
 
+.studio-rail {
+  grid-area: rail;
+}
+.studio-catalog {
+  grid-area: catalog;
+}
+.studio-stage {
+  grid-area: stage;
+}
+.studio-brain {
+  grid-area: brain;
+}
+.studio-dock {
+  grid-area: dock;
+}
+.studio-film {
+  grid-area: film;
+}
+
+.studio-shell-edit {
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-areas:
+    "rail"
+    "stage"
+    "dock";
+}
+
 @media (min-width: 1024px) {
   .studio-shell {
-    grid-template-columns: 13rem minmax(0, 1fr) 19rem;
+    grid-template-columns: 4.5rem 13rem minmax(0, 1fr) 19rem;
     grid-template-rows: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "rail catalog stage brain"
+      "dock dock dock dock";
+  }
+
+  .studio-shell-edit {
+    grid-template-columns: 4.5rem minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "rail stage"
+      "dock dock";
   }
 }
