@@ -5,18 +5,48 @@ import { applySurfaceLighting, finishPrint, warpImageToQuad } from "@/lib/warp";
 import { compositeDecoration } from "@/lib/etch";
 import { treatLogo } from "@/lib/render";
 import { SPOT_SWATCHES } from "@/lib/treat";
+import { TPX_NAVY_RGB } from "@/lib/brand";
+import { clamp, cloneQuad, insetLogoQuad, type Quad } from "@/lib/geometry";
 import {
-  clamp,
-  cloneQuad,
-  insetLogoQuad,
-  isConvexQuad,
-  type Quad,
-} from "@/lib/geometry";
+  CORNER_LABELS,
+  LOUPE_PX,
+  LOUPE_ZOOM,
+  edgeMid,
+  loupeRadiusPx,
+  loupeToWorld,
+  moveCorner,
+  moveEdge,
+  nudgeCorner,
+  nudgeQuad,
+  pointInQuad,
+  translateQuad,
+  viewForCorner,
+  viewForZone,
+  worldToLoupe,
+  type PlaceTool,
+} from "@/lib/place";
 import { cn } from "@/lib/utils";
 
 export type StageHandle = {
   exportPng: () => Promise<void>;
   getFrames: () => Promise<{ original: HTMLCanvasElement; branded: HTMLCanvasElement } | null>;
+  zoomFit: () => void;
+  zoomZone: () => void;
+  zoomCorner: (i?: number) => void;
+  zoomBy: (factor: number) => void;
+  nudge: (dx: number, dy: number, coarse?: boolean) => void;
+  setTool: (t: PlaceTool) => void;
+  selectCorner: (i: number) => void;
+  tool: () => PlaceTool;
+};
+
+type StageCanvasProps = {
+  loupeCanvas?: HTMLCanvasElement | null;
+  loupeZoom?: number;
+  hideLoupe?: boolean;
+  sel?: number;
+  onSel?: (i: number) => void;
+  tool?: PlaceTool;
 };
 
 function capSize(w: number, h: number, max = 1600) {
@@ -24,9 +54,14 @@ function capSize(w: number, h: number, max = 1600) {
   return { w: Math.round(w * s), h: Math.round(h * s) };
 }
 
-export const StageCanvas = forwardRef<StageHandle>(function StageCanvas(_, ref) {
+export const StageCanvas = forwardRef<StageHandle, StageCanvasProps>(function StageCanvas(
+  { loupeCanvas = null, loupeZoom = LOUPE_ZOOM, hideLoupe = false, sel: selProp, onSel, tool: toolProp },
+  ref,
+) {
   const wrapRef = useRef<HTMLDivElement>(null);
+  const viewRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const floatLoupeRef = useRef<HTMLCanvasElement>(null);
   const productRef = useRef<HTMLImageElement | null>(null);
   const logoRef = useRef<HTMLCanvasElement | null>(null);
 
@@ -62,8 +97,36 @@ export const StageCanvas = forwardRef<StageHandle>(function StageCanvas(_, ref) 
   const [fitted, setFitted] = useState({ w: 0, h: 0 });
   const [ready, setReady] = useState(false);
   const [logoTick, setLogoTick] = useState(0);
+  const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [toolInner, setToolInner] = useState<PlaceTool>("zone");
+  const [selInner, setSelInner] = useState(0);
+  const tool = toolProp ?? toolInner;
+  const sel = selProp ?? selInner;
+  const setSel = (i: number) => {
+    onSel?.(i);
+    if (selProp === undefined) setSelInner(i);
+  };
   const dragIndex = useRef<number>(-1);
+  const dragEdge = useRef<number>(-1);
   const moveDrag = useRef<{ x: number; y: number; ox: number; oy: number } | null>(null);
+  const zoneDrag = useRef<{ x: number; y: number; q: Quad } | null>(null);
+  const panDrag = useRef<{ x: number; y: number; px: number; py: number } | null>(null);
+  const pointers = useRef(new Map<number, { x: number; y: number }>());
+  const pinch = useRef<{ dist: number; zoom: number; panX: number; panY: number } | null>(null);
+  const zoomRef = useRef(1);
+  const panRef = useRef({ x: 0, y: 0 });
+  const toolRef = useRef<PlaceTool>("zone");
+  const selRef = useRef(0);
+  const loupeOrigin = useRef<Quad | null>(null);
+  const loupeZoomRef = useRef(loupeZoom);
+  zoomRef.current = zoom;
+  panRef.current = pan;
+  toolRef.current = tool;
+  selRef.current = sel;
+  loupeZoomRef.current = loupeZoom;
+
+  const activeLoupe = () => loupeCanvas ?? floatLoupeRef.current;
 
   const paint = useCallback(
     (withGuides: boolean, quality: "live" | "full") => {
@@ -142,6 +205,67 @@ export const StageCanvas = forwardRef<StageHandle>(function StageCanvas(_, ref) 
     [quad, scale, offsetX, offsetY, opacity, wrap, cylinderArc, lighting, method, material, compare],
   );
 
+  const paintLoupe = useCallback(() => {
+    const loupe = activeLoupe();
+    const product = productRef.current;
+    if (!loupe || !product) return;
+    const ctx = loupe.getContext("2d");
+    if (!ctx) return;
+    const i = selRef.current;
+    const live = quad[i]!;
+    const origin = loupeOrigin.current?.[i] ?? live;
+    const nw = product.naturalWidth || product.width;
+    const nh = product.naturalHeight || product.height;
+    const z = loupeZoomRef.current;
+    const r = loupeRadiusPx(nw, nh, z);
+    const sx = origin.x * nw - r;
+    const sy = origin.y * nh - r;
+    loupe.width = LOUPE_PX;
+    loupe.height = LOUPE_PX;
+    ctx.fillStyle = "#efe8dc";
+    ctx.fillRect(0, 0, LOUPE_PX, LOUPE_PX);
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(product, sx, sy, r * 2, r * 2, 0, 0, LOUPE_PX, LOUPE_PX);
+
+    ctx.strokeStyle = "rgba(4, 38, 63, 0.18)";
+    ctx.lineWidth = 1;
+    for (let g = 1; g < 4; g++) {
+      const t = (LOUPE_PX * g) / 4;
+      ctx.beginPath();
+      ctx.moveTo(t, 0);
+      ctx.lineTo(t, LOUPE_PX);
+      ctx.moveTo(0, t);
+      ctx.lineTo(LOUPE_PX, t);
+      ctx.stroke();
+    }
+
+    ctx.strokeStyle = "rgba(209, 129, 46, 0.95)";
+    ctx.lineWidth = 1.5;
+    const prev = quad[(i + 3) % 4]!;
+    const next = quad[(i + 1) % 4]!;
+    const a = worldToLoupe(prev, origin, nw, nh, z, LOUPE_PX);
+    const b = worldToLoupe(live, origin, nw, nh, z, LOUPE_PX);
+    const c = worldToLoupe(next, origin, nw, nh, z, LOUPE_PX);
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    ctx.lineTo(c.x, c.y);
+    ctx.stroke();
+
+    ctx.strokeStyle = "rgba(209, 129, 46, 0.7)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(b.x, 8);
+    ctx.lineTo(b.x, LOUPE_PX - 8);
+    ctx.moveTo(8, b.y);
+    ctx.lineTo(LOUPE_PX - 8, b.y);
+    ctx.stroke();
+    ctx.fillStyle = "rgb(209, 129, 46)";
+    ctx.beginPath();
+    ctx.arc(b.x, b.y, 3.5, 0, Math.PI * 2);
+    ctx.fill();
+  }, [quad, loupeCanvas]);
+
   useImperativeHandle(
     ref,
     () => ({
@@ -179,8 +303,41 @@ export const StageCanvas = forwardRef<StageHandle>(function StageCanvas(_, ref) 
         paint(showGuides, "full");
         return { original, branded };
       },
+      zoomFit: () => {
+        setZoom(1);
+        setPan({ x: 0, y: 0 });
+      },
+      zoomZone: () => {
+        const v = viewForZone(useStudio.getState().quad, fitted);
+        setZoom(v.zoom);
+        setPan({ x: v.panX, y: v.panY });
+      },
+      zoomCorner: (i) => {
+        const idx = i ?? selRef.current;
+        const v = viewForCorner(useStudio.getState().quad, idx, fitted);
+        setZoom(v.zoom);
+        setPan({ x: v.panX, y: v.panY });
+      },
+      zoomBy: (factor) => {
+        setZoom((z) => clamp(z * factor, 1, 8));
+      },
+      nudge: (dx, dy, coarse = false) => {
+        const s = useStudio.getState();
+        if (toolRef.current === "mark") {
+          s.setOffset(clamp(s.offsetX + dx * 0.01, -0.4, 0.4), clamp(s.offsetY + dy * 0.01, -0.4, 0.4));
+          return;
+        }
+        const next =
+          selRef.current >= 0
+            ? nudgeCorner(s.quad, selRef.current, dx, dy, coarse)
+            : nudgeQuad(s.quad, dx, dy, coarse);
+        if (next) s.setQuad(next);
+      },
+      setTool: (t) => setToolInner(t),
+      selectCorner: (i) => setSel(i),
+      tool: () => toolRef.current,
     }),
-    [paint, showGuides, dragging],
+    [paint, showGuides, dragging, fitted],
   );
 
   useEffect(() => {
@@ -197,6 +354,8 @@ export const StageCanvas = forwardRef<StageHandle>(function StageCanvas(_, ref) 
           canvas.height = h;
         }
         setReady(true);
+        setZoom(1);
+        setPan({ x: 0, y: 0 });
       })
       .catch(() => undefined);
     return () => {
@@ -207,7 +366,7 @@ export const StageCanvas = forwardRef<StageHandle>(function StageCanvas(_, ref) 
   useEffect(() => {
     let cancelled = false;
     const run = async () => {
-      const spot = SPOT_SWATCHES.find((s) => s.id === spotId)?.rgb ?? [4, 38, 63];
+      const spot = SPOT_SWATCHES.find((s) => s.id === spotId)?.rgb ?? [...TPX_NAVY_RGB];
       if (logo.kind === "wordmark") {
         const canvas = renderWordmark(wordmark, invert);
         const lum = productTone === "dark" ? 70 : productTone === "light" ? 200 : 128;
@@ -237,7 +396,11 @@ export const StageCanvas = forwardRef<StageHandle>(function StageCanvas(_, ref) 
   }, [ready, paint, showGuides, dragging, logoTick, productSrc]);
 
   useEffect(() => {
-    const el = wrapRef.current?.parentElement;
+    paintLoupe();
+  }, [paintLoupe, sel, ready, loupeZoom]);
+
+  useEffect(() => {
+    const el = viewRef.current;
     if (!el) return;
     const canvas = canvasRef.current;
     const apply = () => {
@@ -254,108 +417,345 @@ export const StageCanvas = forwardRef<StageHandle>(function StageCanvas(_, ref) 
     return () => ro.disconnect();
   }, [ready, productSrc]);
 
+  const uvAt = (clientX: number, clientY: number) => {
+    const rect = wrapRef.current?.getBoundingClientRect();
+    if (!rect || !rect.width) return { x: 0, y: 0 };
+    return {
+      x: clamp((clientX - rect.left) / rect.width, 0, 1),
+      y: clamp((clientY - rect.top) / rect.height, 0, 1),
+    };
+  };
+
+  const applyLoupe = (clientX: number, clientY: number, target: HTMLElement) => {
+    const origin = loupeOrigin.current;
+    const p = origin?.[selRef.current];
+    const product = productRef.current;
+    if (!origin || !p || !product) return;
+    const box = target.getBoundingClientRect();
+    if (!box.width) return;
+    const nx = clamp((clientX - box.left) / box.width, 0, 1);
+    const ny = clamp((clientY - box.top) / box.height, 0, 1);
+    const nw = product.naturalWidth || product.width;
+    const nh = product.naturalHeight || product.height;
+    const world = loupeToWorld(p, nx, ny, nw, nh, loupeZoomRef.current);
+    const next = moveCorner(origin, selRef.current, world);
+    if (next) setQuad(next);
+  };
+
   const onPointerMove = (e: React.PointerEvent) => {
-    if (!wrapRef.current) return;
-    const rect = wrapRef.current.getBoundingClientRect();
-    const x = clamp((e.clientX - rect.left) / rect.width, 0, 1);
-    const y = clamp((e.clientY - rect.top) / rect.height, 0, 1);
-    if (dragIndex.current >= 0) {
-      const next = cloneQuad(quad);
-      next[dragIndex.current] = { x, y };
-      if (isConvexQuad(next)) setQuad(next);
+    pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pinch.current && pointers.current.size >= 2) {
+      const pts = [...pointers.current.values()];
+      const d = Math.hypot(pts[0]!.x - pts[1]!.x, pts[0]!.y - pts[1]!.y);
+      const z = clamp(pinch.current.zoom * (d / pinch.current.dist), 1, 8);
+      setZoom(z);
+      return;
+    }
+    if (dragIndex.current >= 0 && loupeOrigin.current && (e.currentTarget as HTMLElement).dataset.loupe) {
+      applyLoupe(e.clientX, e.clientY, e.currentTarget as HTMLElement);
+      return;
+    }
+    const { x, y } = uvAt(e.clientX, e.clientY);
+    if (dragIndex.current >= 0 && !loupeOrigin.current) {
+      const next = moveCorner(quad, dragIndex.current, { x, y });
+      if (next) setQuad(next);
+      return;
+    }
+    if (dragEdge.current >= 0 && zoneDrag.current) {
+      const next = moveEdge(zoneDrag.current.q, dragEdge.current, x - zoneDrag.current.x, y - zoneDrag.current.y);
+      if (next) setQuad(next);
+      return;
+    }
+    if (zoneDrag.current) {
+      const next = translateQuad(zoneDrag.current.q, x - zoneDrag.current.x, y - zoneDrag.current.y);
+      if (next) setQuad(next);
       return;
     }
     if (moveDrag.current) {
       const dx = (x - moveDrag.current.x) * 1.6;
       const dy = (y - moveDrag.current.y) * 1.6;
-      setOffset(
-        clamp(moveDrag.current.ox + dx, -0.4, 0.4),
-        clamp(moveDrag.current.oy + dy, -0.4, 0.4),
-      );
+      setOffset(clamp(moveDrag.current.ox + dx, -0.4, 0.4), clamp(moveDrag.current.oy + dy, -0.4, 0.4));
+    }
+    if (panDrag.current) {
+      setPan({
+        x: panDrag.current.px + (e.clientX - panDrag.current.x),
+        y: panDrag.current.py + (e.clientY - panDrag.current.y),
+      });
     }
   };
 
-  const endDrag = (e: React.PointerEvent) => {
-    if (dragIndex.current < 0 && !moveDrag.current) return;
+  const endDrag = (e: React.PointerEvent | PointerEvent) => {
+    const target = e.currentTarget as HTMLElement | null;
+    pointers.current.delete(e.pointerId);
+    if (pointers.current.size < 2) pinch.current = null;
+    if (dragIndex.current < 0 && dragEdge.current < 0 && !moveDrag.current && !zoneDrag.current && !panDrag.current) {
+      return;
+    }
     dragIndex.current = -1;
+    dragEdge.current = -1;
     moveDrag.current = null;
+    zoneDrag.current = null;
+    panDrag.current = null;
+    loupeOrigin.current = null;
     setDragging(false);
     useStudio.getState().rememberNow();
-    try {
-      e.currentTarget.releasePointerCapture(e.pointerId);
-    } catch {
-      /* already released */
+    if (target) {
+      try {
+        target.releasePointerCapture(e.pointerId);
+      } catch {
+        /* already released */
+      }
     }
+    paintLoupe();
   };
 
-  const startMove = (e: React.PointerEvent) => {
-    if (dragIndex.current >= 0) return;
-    const rect = wrapRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    const x = clamp((e.clientX - rect.left) / rect.width, 0, 1);
-    const y = clamp((e.clientY - rect.top) / rect.height, 0, 1);
-    moveDrag.current = { x, y, ox: offsetX, oy: offsetY };
-    setDragging(true);
+  const startOnStage = (e: React.PointerEvent) => {
+    pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pointers.current.size === 2) {
+      const pts = [...pointers.current.values()];
+      pinch.current = {
+        dist: Math.hypot(pts[0]!.x - pts[1]!.x, pts[0]!.y - pts[1]!.y) || 1,
+        zoom: zoomRef.current,
+        panX: panRef.current.x,
+        panY: panRef.current.y,
+      };
+      zoneDrag.current = null;
+      moveDrag.current = null;
+      panDrag.current = null;
+      return;
+    }
+    if (dragIndex.current >= 0 || dragEdge.current >= 0) return;
+    const { x, y } = uvAt(e.clientX, e.clientY);
+    if (e.altKey || e.button === 1) {
+      panDrag.current = { x: e.clientX, y: e.clientY, px: pan.x, py: pan.y };
+      e.currentTarget.setPointerCapture(e.pointerId);
+      return;
+    }
+    if (tool === "zone" && pointInQuad(quad, { x, y })) {
+      useStudio.getState().pushHistory();
+      zoneDrag.current = { x, y, q: cloneQuad(quad) };
+      setDragging(true);
+      e.currentTarget.setPointerCapture(e.pointerId);
+      return;
+    }
+    if (tool === "mark") {
+      useStudio.getState().pushHistory();
+      moveDrag.current = { x, y, ox: offsetX, oy: offsetY };
+      setDragging(true);
+      e.currentTarget.setPointerCapture(e.pointerId);
+      return;
+    }
+    panDrag.current = { x: e.clientX, y: e.clientY, px: pan.x, py: pan.y };
     e.currentTarget.setPointerCapture(e.pointerId);
   };
 
-  const labels = ["TL", "TR", "BR", "BL"];
+  const onWheel = (e: React.WheelEvent) => {
+    if (!e.ctrlKey && !e.metaKey && Math.abs(e.deltaY) < 40 && !e.shiftKey) {
+      setPan((p) => ({ x: p.x - e.deltaX, y: p.y - e.deltaY }));
+      return;
+    }
+    e.preventDefault();
+    const factor = e.deltaY > 0 ? 0.9 : 1.12;
+    setZoom((z) => clamp(z * factor, 1, 8));
+  };
+
+  const onKey = (e: React.KeyboardEvent) => {
+    const cornerKeys: Record<string, number> = { "1": 0, "2": 1, "3": 2, "4": 3 };
+    if (e.key in cornerKeys) {
+      e.preventDefault();
+      setSel(cornerKeys[e.key]!);
+      return;
+    }
+    const map: Record<string, [number, number]> = {
+      ArrowLeft: [-1, 0],
+      ArrowRight: [1, 0],
+      ArrowUp: [0, -1],
+      ArrowDown: [0, 1],
+    };
+    const d = map[e.key];
+    if (!d) return;
+    e.preventDefault();
+    const s = useStudio.getState();
+    const next = nudgeCorner(s.quad, selRef.current, d[0], d[1], e.shiftKey);
+    if (next) s.setQuad(next);
+  };
+
+  const startLoupeOn = (e: PointerEvent, target: HTMLCanvasElement) => {
+    e.preventDefault();
+    useStudio.getState().pushHistory();
+    loupeOrigin.current = cloneQuad(useStudio.getState().quad);
+    dragIndex.current = selRef.current;
+    setDragging(true);
+    target.setPointerCapture(e.pointerId);
+    applyLoupe(e.clientX, e.clientY, target);
+  };
+
+  useEffect(() => {
+    const el = loupeCanvas;
+    if (!el) return;
+    const down = (e: PointerEvent) => startLoupeOn(e, el);
+    const move = (e: PointerEvent) => {
+      if (dragIndex.current < 0 || !loupeOrigin.current) return;
+      applyLoupe(e.clientX, e.clientY, el);
+    };
+    const up = (e: PointerEvent) => endDrag(e);
+    el.addEventListener("pointerdown", down);
+    el.addEventListener("pointermove", move);
+    el.addEventListener("pointerup", up);
+    el.addEventListener("pointercancel", up);
+    paintLoupe();
+    return () => {
+      el.removeEventListener("pointerdown", down);
+      el.removeEventListener("pointermove", move);
+      el.removeEventListener("pointerup", up);
+      el.removeEventListener("pointercancel", up);
+    };
+  }, [loupeCanvas, paintLoupe]);
+
+  const handleScale = 1 / zoom;
+  const showFloatLoupe = showGuides && !hideLoupe && !loupeCanvas;
 
   return (
-    <div className="relative flex h-full min-h-0 w-full items-center justify-center overflow-hidden p-2">
+    <div
+      ref={viewRef}
+      tabIndex={0}
+      className="relative flex h-full min-h-0 w-full items-center justify-center overflow-hidden p-2 outline-none"
+      onWheel={onWheel}
+      onKeyDown={onKey}
+    >
       <div
-        ref={wrapRef}
-        className="relative max-h-full max-w-full"
         style={{
-          width: fitted.w ? fitted.w : "100%",
-          height: fitted.h ? fitted.h : "auto",
-          maxWidth: "100%",
-          maxHeight: "100%",
+          transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+          transformOrigin: "center center",
         }}
-        onPointerDown={startMove}
-        onPointerMove={onPointerMove}
-        onPointerUp={endDrag}
-        onPointerCancel={endDrag}
+        className="relative"
       >
-        <canvas
-          ref={canvasRef}
-          className="block max-h-full max-w-full outline outline-1 -outline-offset-1 outline-foreground/10"
-          style={{ width: "100%", height: "100%" }}
-        />
-        {showGuides &&
-          quad.map((p, i) => (
-            <button
-              key={i}
-              type="button"
-              aria-label={`Move ${labels[i]} corner`}
-              className="absolute z-10 size-11 -translate-x-1/2 -translate-y-1/2 touch-none rounded-full bg-primary text-[10px] font-semibold tracking-wide text-primary-foreground shadow-[var(--shadow-border)] after:absolute after:left-1/2 after:top-1/2 after:size-12 after:-translate-x-1/2 after:-translate-y-1/2"
-              style={{ left: `${p.x * 100}%`, top: `${p.y * 100}%` }}
-              onPointerDown={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                dragIndex.current = i;
-                setDragging(true);
-                e.currentTarget.setPointerCapture(e.pointerId);
-              }}
-            >
-              {labels[i]}
-            </button>
-          ))}
-        {(scanning || generating) && (
-          <div className="pointer-events-none absolute inset-0 overflow-hidden">
-            <div className="absolute inset-0 bg-background/20" />
-            <div className="absolute inset-x-0 top-0 h-px bg-primary scan-sweep" />
-          </div>
-        )}
-        {!ready && <div className="absolute inset-0 animate-pulse bg-secondary" />}
+        <div
+          ref={wrapRef}
+          className="relative max-h-full max-w-full"
+          style={{
+            width: fitted.w ? fitted.w : "100%",
+            height: fitted.h ? fitted.h : "auto",
+            maxWidth: "100%",
+            maxHeight: "100%",
+          }}
+          onPointerDown={startOnStage}
+          onPointerMove={onPointerMove}
+          onPointerUp={endDrag}
+          onPointerCancel={endDrag}
+        >
+          <canvas
+            ref={canvasRef}
+            className="block max-h-full max-w-full outline outline-1 -outline-offset-1 outline-foreground/10"
+            style={{ width: "100%", height: "100%" }}
+          />
+          {showGuides &&
+            [0, 1, 2, 3].map((edge) => {
+              const m = edgeMid(quad, edge);
+              return (
+                <button
+                  key={`e${edge}`}
+                  type="button"
+                  aria-label={`Move edge ${edge}`}
+                  className="absolute z-10 size-8 -translate-x-1/2 -translate-y-1/2 touch-none rounded-sm bg-primary/90 shadow-[var(--shadow-border)] after:absolute after:left-1/2 after:top-1/2 after:size-11 after:-translate-x-1/2 after:-translate-y-1/2"
+                  style={{
+                    left: `${m.x * 100}%`,
+                    top: `${m.y * 100}%`,
+                    transform: `translate(-50%, -50%) scale(${handleScale})`,
+                  }}
+                  onPointerDown={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    useStudio.getState().pushHistory();
+                    const uv = uvAt(e.clientX, e.clientY);
+                    dragEdge.current = edge;
+                    zoneDrag.current = { x: uv.x, y: uv.y, q: cloneQuad(quad) };
+                    setDragging(true);
+                    e.currentTarget.setPointerCapture(e.pointerId);
+                  }}
+                />
+              );
+            })}
+          {showGuides &&
+            quad.map((p, i) => (
+              <button
+                key={i}
+                type="button"
+                aria-label={`Move ${CORNER_LABELS[i]} corner`}
+                className={cn(
+                  "absolute z-20 size-11 -translate-x-1/2 -translate-y-1/2 touch-none rounded-full bg-primary text-xs font-semibold tracking-wide text-primary-foreground shadow-[var(--shadow-border)] after:absolute after:left-1/2 after:top-1/2 after:size-12 after:-translate-x-1/2 after:-translate-y-1/2",
+                  sel === i ? "ring-2 ring-foreground" : "opacity-80",
+                )}
+                style={{
+                  left: `${p.x * 100}%`,
+                  top: `${p.y * 100}%`,
+                  transform: `translate(-50%, -50%) scale(${handleScale})`,
+                }}
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  useStudio.getState().pushHistory();
+                  dragIndex.current = i;
+                  setSel(i);
+                  setDragging(true);
+                  e.currentTarget.setPointerCapture(e.pointerId);
+                }}
+                onDoubleClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setSel(i);
+                  const v = viewForCorner(quad, i, fitted);
+                  setZoom(v.zoom);
+                  setPan({ x: v.panX, y: v.panY });
+                }}
+              >
+                {CORNER_LABELS[i]}
+              </button>
+            ))}
+          {(scanning || generating) && (
+            <div className="pointer-events-none absolute inset-0 overflow-hidden">
+              <div className="absolute inset-0 bg-background/20" />
+              <div className="absolute inset-x-0 top-0 h-px bg-primary scan-sweep" />
+            </div>
+          )}
+          {!ready && <div className="absolute inset-0 animate-pulse bg-secondary" />}
+        </div>
       </div>
+
+      {showFloatLoupe ? (
+        <div
+          className="absolute z-30 overflow-hidden rounded-xl bg-paper shadow-[var(--shadow-border)]"
+          style={{ width: LOUPE_PX, height: LOUPE_PX, right: 12, top: 12 }}
+        >
+          <canvas
+            ref={floatLoupeRef}
+            width={LOUPE_PX}
+            height={LOUPE_PX}
+            data-loupe="1"
+            className="block size-full touch-none"
+            aria-label="Placement zoom window"
+            onPointerDown={(e) => startLoupeOn(e.nativeEvent, e.currentTarget)}
+            onPointerMove={onPointerMove}
+            onPointerUp={endDrag}
+            onPointerCancel={endDrag}
+          />
+          <p className="pointer-events-none absolute bottom-1 left-0 right-0 text-center text-xs font-medium text-primary">
+            {CORNER_LABELS[sel]} · click to place
+          </p>
+        </div>
+      ) : null}
+
       <p
         className={cn(
           "pointer-events-none absolute bottom-3 left-1/2 -translate-x-1/2 text-xs text-muted-foreground",
           !showGuides && "hidden",
         )}
       >
-        {compare ? "SKU  ·  branded" : "Drag the mark · corners lock the print zone"}
+        {compare
+          ? "SKU  ·  branded"
+          : tool === "zone"
+            ? "Corners lock the face · click the zoom window to pin · pinch to zoom"
+            : "Drag the mark inside the zone"}
       </p>
     </div>
   );

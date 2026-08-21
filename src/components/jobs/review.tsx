@@ -1,7 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Maximize2 } from "lucide-react";
 import { StageCanvas, type StageHandle } from "@/components/studio/stage-canvas";
+import { LogoDock } from "@/components/studio/logo-dock";
+import { PlaceWindow } from "@/components/jobs/place-window";
 import { Button } from "@/components/ui/button";
-import { MOCKUPS, type WrapMode } from "@/lib/mockups";
+import { MOCKUPS } from "@/lib/mockups";
 import { useStudio } from "@/lib/store";
 import { detectSurface } from "@/lib/detect";
 import {
@@ -16,12 +19,10 @@ import {
 } from "@/lib/engine";
 import { fetchOverride, listOverrides, persistOverride } from "@/lib/placement-api";
 import { copyText } from "@/lib/copy-text";
-import { METHODS } from "@/lib/methods";
+import { LOUPE_ZOOM, type PlaceTool } from "@/lib/place";
 import { cn } from "@/lib/utils";
 
-const WRAPS: WrapMode[] = ["plane", "cylinder", "taper", "cone", "sphere"];
-
-function fingerprint(quad: ReturnType<typeof quadToEngine>, wrap: WrapMode, arc: number) {
+function fingerprint(quad: ReturnType<typeof quadToEngine>, wrap: string, arc: number) {
   return JSON.stringify({ quad, wrap, arc });
 }
 
@@ -36,17 +37,37 @@ export function ReviewScreen() {
   const setQuad = useStudio((s) => s.setQuad);
   const setWrap = useStudio((s) => s.setWrap);
   const setMethod = useStudio((s) => s.setMethod);
+  const setScale = useStudio((s) => s.setScale);
+  const setCylinderArc = useStudio((s) => s.setCylinderArc);
+  const setCompare = useStudio((s) => s.setCompare);
+  const pushHistory = useStudio((s) => s.pushHistory);
+  const undo = useStudio((s) => s.undo);
+  const redo = useStudio((s) => s.redo);
+  const canUndo = useStudio((s) => s.canUndo());
+  const canRedo = useStudio((s) => s.canRedo());
   const sku = "sku" in mockup ? mockup.sku : "";
   const method = useStudio((s) => s.method);
   const wrap = useStudio((s) => s.wrap);
   const cylinderArc = useStudio((s) => s.cylinderArc);
+  const scale = useStudio((s) => s.scale);
+  const compare = useStudio((s) => s.compare);
   const quad = useStudio((s) => s.quad);
-  const [note, setNote] = useState("Drag a corner. Warp follows.");
+  const maxScale = "maxScale" in mockup ? mockup.maxScale : 0.96;
+  const [note, setNote] = useState("Click the zoom window to pin a corner. Minimise it when you need the photo.");
   const [origin, setOrigin] = useState<"detected" | "override">("detected");
   const [base, setBase] = useState("");
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [phrase, setPhrase] = useState("");
   const [saving, setSaving] = useState(false);
+  const [winOpen, setWinOpen] = useState(true);
+  const [tool, setTool] = useState<PlaceTool>("zone");
+  const [sel, setSel] = useState(0);
+  const [loupeZoom, setLoupeZoom] = useState<number>(LOUPE_ZOOM);
+  const [loupeCanvas, setLoupeCanvas] = useState<HTMLCanvasElement | null>(null);
+
+  const bindLoupe = useCallback((el: HTMLCanvasElement | null) => {
+    setLoupeCanvas((prev) => (prev === el ? prev : el));
+  }, []);
 
   const engineQuad = quadToEngine(quad);
   const dirty = useMemo(
@@ -132,6 +153,7 @@ export function ReviewScreen() {
     setOrigin("detected");
     setBase(fingerprint(quadToEngine(s.quad), s.wrap, s.cylinderArc));
     setNote(d.accepted ? "Reset to detected plane." : d.notes);
+    stageRef.current?.zoomFit();
   };
 
   const onCopy = async () => {
@@ -151,92 +173,102 @@ export function ReviewScreen() {
     setOrigin("detected");
     setBase(fingerprint(quadToEngine(s.quad), s.wrap, s.cylinderArc));
     setNote(d.accepted ? "Detected the branding face. Drag corners to correct." : d.notes);
+    stageRef.current?.zoomZone();
+  };
+
+  const pickTool = (t: PlaceTool) => {
+    setTool(t);
+    stageRef.current?.setTool(t);
+    setNote(t === "zone" ? "Print zone. Corners and edges." : "Mark. Drag the logo inside the zone.");
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col md:flex-row">
-      <aside className="flex shrink-0 gap-2 overflow-x-auto border-b border-border p-2 md:h-full md:w-40 md:flex-col md:overflow-y-auto md:border-b-0 md:border-r">
-        {MOCKUPS.map((m) => (
-          <button
-            key={m.id}
-            type="button"
-            onClick={() => selectMockup(m.id)}
-            className={cn(
-              "relative h-16 w-24 shrink-0 overflow-hidden rounded-lg md:h-20 md:w-full",
-              mockupId === m.id && "ring-1 ring-primary",
-            )}
-          >
-            <img src={m.src} alt="" className="size-full bg-paper object-contain" />
-            <span className="absolute inset-x-0 bottom-0 bg-background/80 px-1 py-0.5 text-xs tabular-nums">
-              {m.sku}
-            </span>
-          </button>
-        ))}
-      </aside>
-      <div className="relative min-h-0 min-w-0 flex-1 bg-paper">
-        <StageCanvas ref={stageRef} />
-        <p className="pointer-events-none absolute left-3 top-3 rounded-md bg-background/80 px-2 py-1 text-xs uppercase tracking-wider text-muted-foreground">
-          {source === "override" ? "Override" : source === "edited" ? "Edited" : "Detected"}
-        </p>
-      </div>
-      <aside className="shrink-0 space-y-3 border-t border-border p-4 md:w-72 md:overflow-y-auto md:border-l md:border-t-0">
-        <p className="text-xs tabular-nums text-muted-foreground">{sku || "—"}</p>
-        <h2 className="text-lg font-semibold leading-tight">{mockup.name}</h2>
-        <p className="text-sm text-muted-foreground">{METHODS[method].label}</p>
-        <div className="flex flex-wrap gap-1">
-          {mockup.methods.map((id) => (
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="relative flex min-h-0 flex-1 flex-col md:flex-row">
+        <aside className="flex shrink-0 gap-2 overflow-x-auto border-b border-border p-2 md:h-full md:w-36 md:flex-col md:overflow-y-auto md:border-b-0 md:border-r">
+          {MOCKUPS.map((m) => (
             <button
-              key={id}
+              key={m.id}
               type="button"
-              onClick={() => setMethod(id)}
+              onClick={() => selectMockup(m.id)}
               className={cn(
-                "min-h-11 rounded-lg px-3 text-xs",
-                method === id ? "bg-secondary text-foreground" : "text-muted-foreground",
+                "relative h-16 w-24 shrink-0 overflow-hidden rounded-lg md:h-20 md:w-full",
+                mockupId === m.id && "ring-1 ring-primary",
               )}
             >
-              {METHODS[id].short}
+              <img src={m.src} alt="" className="size-full bg-paper object-contain" />
+              <span className="absolute inset-x-0 bottom-0 bg-background/80 px-1 py-0.5 text-xs tabular-nums">
+                {m.sku}
+              </span>
             </button>
           ))}
-        </div>
-        <div className="flex flex-wrap gap-1">
-          {WRAPS.map((w) => (
-            <button
-              key={w}
-              type="button"
-              onClick={() => setWrap(w)}
-              className={cn(
-                "min-h-11 rounded-lg px-3 text-xs capitalize",
-                wrap === w ? "bg-secondary text-foreground" : "text-muted-foreground",
-              )}
-            >
-              {w}
-            </button>
-          ))}
-        </div>
-        <Button className="h-11 w-full" onClick={openSave}>
-          Save for this SKU
-        </Button>
-        <Button variant="secondary" className="h-11 w-full" onClick={() => void onReset()}>
-          Reset to detected
-        </Button>
-        <label className="flex h-11 w-full cursor-pointer items-center justify-center rounded-md bg-secondary text-sm">
-          Upload product photo
-          <input
-            type="file"
-            accept="image/*"
-            capture="environment"
-            className="hidden"
-            onChange={(e) => {
-              void onUpload(e.target.files?.[0] ?? null);
-              e.target.value = "";
-            }}
+        </aside>
+        <div className="relative min-h-0 min-w-0 flex-1 bg-paper">
+          <StageCanvas
+            ref={stageRef}
+            loupeCanvas={winOpen ? loupeCanvas : null}
+            hideLoupe
+            loupeZoom={loupeZoom}
+            sel={sel}
+            onSel={setSel}
+            tool={tool}
           />
-        </label>
-        <Button variant="secondary" className="h-11 w-full" onClick={() => void onCopy()}>
-          Copy override JSON
-        </Button>
-        <p className="text-sm text-muted-foreground">{note}</p>
-      </aside>
+          {!winOpen ? (
+            <button
+              type="button"
+              onClick={() => setWinOpen(true)}
+              className="absolute bottom-3 left-3 z-40 flex min-h-11 items-center gap-2 rounded-xl bg-card px-4 text-xs font-medium shadow-[var(--shadow-border)]"
+              aria-label="Open placement window"
+            >
+              <Maximize2 className="size-4" />
+              Place
+            </button>
+          ) : null}
+        </div>
+        {winOpen ? (
+          <PlaceWindow
+            stageRef={stageRef}
+            onLoupeCanvas={bindLoupe}
+            tool={tool}
+            onTool={pickTool}
+            sel={sel}
+            onSel={setSel}
+            loupeZoom={loupeZoom}
+            onLoupeZoom={setLoupeZoom}
+            quad={quad}
+            scale={scale}
+            maxScale={maxScale}
+            onScale={setScale}
+            wrap={wrap}
+            onWrap={setWrap}
+            cylinderArc={cylinderArc}
+            onCurve={setCylinderArc}
+            method={method}
+            methods={mockup.methods}
+            onMethod={setMethod}
+            sku={sku}
+            name={mockup.name}
+            source={source}
+            note={note}
+            canUndo={canUndo}
+            canRedo={canRedo}
+            onUndo={undo}
+            onRedo={redo}
+            onSave={openSave}
+            onReset={() => void onReset()}
+            onUpload={(f) => void onUpload(f)}
+            onCopy={() => void onCopy()}
+            onSplit={() => setCompare(!compare)}
+            compare={compare}
+            onClose={() => {
+              bindLoupe(null);
+              setWinOpen(false);
+            }}
+            onGesture={pushHistory}
+          />
+        ) : null}
+      </div>
+      <LogoDock />
 
       {confirmOpen ? (
         <div className="fixed inset-0 z-40 flex items-end justify-center bg-background/70 p-3 md:items-center">

@@ -5,7 +5,7 @@ import { SearchScreen } from "@/components/jobs/search";
 import { cn } from "@/lib/utils";
 
 const JOBS = [
-  { id: "review", label: "Review" },
+  { id: "review", label: "Place" },
   { id: "optics", label: "Optics" },
   { id: "search", label: "Search" },
 ] as const;

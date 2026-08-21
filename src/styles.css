@@ -176,3 +176,15 @@
       "dock dock";
   }
 }
+
+.place-sheet {
+  transition:
+    transform 250ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 150ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@media (max-width: 767px) {
+  .place-sheet {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}

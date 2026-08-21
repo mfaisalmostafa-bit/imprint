@@ -20,6 +20,7 @@ const srcBlob = walk("src").map((p) => readFileSync(p, "utf8")).join("\n");
 const engineSrc = readFileSync("src/lib/engine.ts", "utf8");
 const reviewSrc = readFileSync("src/components/jobs/review.tsx", "utf8");
 const stageSrc = readFileSync("src/components/studio/stage-canvas.tsx", "utf8");
+const placeWin = readFileSync("src/components/jobs/place-window.tsx", "utf8");
 const jobsApp = readFileSync("src/components/jobs/app.tsx", "utf8");
 const searchUi = readFileSync("src/components/jobs/search.tsx", "utf8");
 const opticsSrc = readFileSync("src/lib/optics-audit.ts", "utf8");
@@ -136,7 +137,50 @@ test("placement persist is shared SQL, not browser-local", () => {
 test("touch handles are at least 44px", () => {
   assert.match(stageSrc, /size-11/);
   assert.match(stageSrc, /after:size-12/);
-  assert.match(reviewSrc, /Reset to detected/);
+  assert.match(placeWin, /Reset to detected/);
+});
+
+test("Place is the main job and the placement window can minimise", () => {
+  assert.match(jobsApp, /label: "Place"/);
+  assert.match(reviewSrc, /Open placement window/);
+  assert.match(placeWin, /Minimise placement window/);
+  assert.match(stageSrc, /Placement zoom window/);
+  assert.match(stageSrc, /Move edge/);
+  assert.match(placeWin, /md:w-80/);
+  assert.match(placeWin, /CORNER_LABELS/);
+  assert.match(placeWin, /Placement zoom window/);
+  assert.match(placeWin, /click to place/);
+  assert.match(stageSrc, /click to place/);
+});
+
+test("placement math moves corners, edges, and refuses a concave quad", async () => {
+  const p = await load("src/lib/place.ts");
+  const q = [
+    { x: 0.2, y: 0.2 },
+    { x: 0.8, y: 0.2 },
+    { x: 0.8, y: 0.8 },
+    { x: 0.2, y: 0.8 },
+  ];
+  const c = p.moveCorner(q, 0, { x: 0.25, y: 0.25 });
+  assert.equal(c[0].x, 0.25);
+  const e = p.moveEdge(q, 0, 0, 0.1);
+  assert.ok(Math.abs(e[0].y - 0.3) < 1e-9);
+  assert.ok(Math.abs(e[1].y - 0.3) < 1e-9);
+  const bad = p.moveCorner(q, 0, { x: 0.9, y: 0.9 });
+  assert.equal(bad, null);
+  const t = p.translateQuad(q, 0.1, 0);
+  assert.ok(t[0].x > q[0].x);
+  const n = p.nudgeCorner(q, 1, 1, 0, false);
+  assert.ok(n[1].x > q[1].x);
+  assert.equal(p.pointInQuad(q, { x: 0.5, y: 0.5 }), true);
+  assert.equal(p.pointInQuad(q, { x: 0.01, y: 0.01 }), false);
+  const mid = p.loupeToWorld({ x: 0.4, y: 0.4 }, 0.5, 0.5, 1000, 1000, 5);
+  assert.ok(Math.abs(mid.x - 0.4) < 1e-9);
+  assert.ok(Math.abs(mid.y - 0.4) < 1e-9);
+  const right = p.loupeToWorld({ x: 0.4, y: 0.4 }, 1, 0.5, 1000, 1000, 5);
+  assert.ok(right.x > 0.4);
+  const back = p.worldToLoupe(right, { x: 0.4, y: 0.4 }, 1000, 1000, 5, 240);
+  assert.ok(Math.abs(back.x - 240) < 1e-6);
 });
 
 test("interpretHits: 40% is not a lock, 95% is", async () => {
