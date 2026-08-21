@@ -10,6 +10,7 @@ const files = {
   brand: readFileSync("src/lib/brand.ts", "utf8"),
   styles: readFileSync("src/styles.css", "utf8"),
   etch: readFileSync("src/lib/etch.ts", "utf8"),
+  treat: readFileSync("src/lib/treat.ts", "utf8"),
 };
 
 const BANNED = ["pad_print", "screen_print", "deboss", "emboss", "foil"];
@@ -78,4 +79,13 @@ test("proof PDF uses house navy / orange and contact", () => {
   assert.doesNotMatch(files.pdf, /#0B1F3A|#E85D04|232, 93, 4/);
   assert.match(files.styles, /#04263f/i);
   assert.match(files.styles, /#d1812e/i);
+});
+
+test("one-colour swatches use locked house navy / orange", () => {
+  assert.match(files.treat, /TPX_NAVY_RGB/);
+  assert.match(files.treat, /TPX_ORANGE_RGB/);
+  assert.doesNotMatch(files.treat, /11,\s*31,\s*58/);
+  assert.doesNotMatch(files.treat, /232,\s*93,\s*4/);
+  assert.match(files.brand, /\[4, 38, 63\]/);
+  assert.match(files.brand, /\[209, 129, 46\]/);
 });

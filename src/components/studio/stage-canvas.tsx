@@ -203,7 +203,7 @@ export const StageCanvas = forwardRef<StageHandle>(function StageCanvas(_, ref) 
   useEffect(() => {
     let cancelled = false;
     const run = async () => {
-      const spot = SPOT_SWATCHES.find((s) => s.id === spotId)?.rgb ?? [11, 31, 58];
+      const spot = SPOT_SWATCHES.find((s) => s.id === spotId)?.rgb ?? [4, 38, 63];
       if (logo.kind === "wordmark") {
         const canvas = renderWordmark(wordmark, invert);
         treatLogo(canvas, treatment, spot);

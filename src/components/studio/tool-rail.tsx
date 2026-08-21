@@ -55,7 +55,9 @@ export function ToolRail({
             }}
             className={cn(
               "flex size-12 shrink-0 flex-col items-center justify-center gap-0.5 rounded-md text-[10px] uppercase tracking-wider",
-              active ? "bg-primary text-primary-foreground" : "bg-secondary text-muted-foreground hover:text-foreground",
+              active
+                ? "bg-foreground text-background"
+                : "text-muted-foreground hover:bg-secondary hover:text-foreground",
             )}
           >
             <Icon className="size-4" />
