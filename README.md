@@ -2,20 +2,19 @@
 
 TePee-X Command Center proofs. A salesperson picks a client, a SKU, and a logo — the generator locks the print zone and renders the **quoted decoration method**, not a Photoshop blend.
 
-## Decoration matrix (locked)
+## Rails
 
-A wrong method is a quoting error. Copy never uses pad print, screen print, emboss, or deboss.
+- Methods: Laser Engraving, UV Printing, UV DTF, Sublimation, Embroidery. Never pad / screen / emboss / deboss / foil.
+- Hard goods, bags, boxes → UV Printing. Textiles / non-embroidery apparel → UV DTF.
+- Brand from `brand.ts` only: navy `#04263F`, orange `#D1812E`, Montserrat.
+- SKUs are `TPX-XXX-NN`. No supplier names.
+- Proofs use catalogue photos only. Imagine is for concepts, never an invoice.
 
-| Category | Method |
-| --- | --- |
-| Metal pen, flask, USB, crystal | Laser Engraving |
-| Ceramic mug | Sublimation |
-| Bag, tote, box, notebook, power bank | UV Printing |
-| Indoor totem, billboard | UV Printing |
-| Apparel (tee, polo, cap, hoodie) | Embroidery (+ UV DTF) |
-| Textiles | UV DTF |
+## Catalogue + order
 
-Proof PDF: navy `#04263F`, orange `#D1812E`, Montserrat, contact block.
+Searchable read-only catalogue (JSON today, live API later). An account manager's order of several SKUs exports as **one branded PDF**: before/after, method from the order line, mark size in millimetres, QC warnings.
+
+Placement corrections persist per SKU.
 
 ## Run
 
@@ -24,10 +23,6 @@ npm install
 npm run dev
 npm test
 ```
-
-Workflow: client → quote/sample/order ref → SKU → logo → method (locked) → QC → Approve into CC → branded PDF.
-
-Scan is local (contrast vs backdrop). No vision API.
 
 ## License
 

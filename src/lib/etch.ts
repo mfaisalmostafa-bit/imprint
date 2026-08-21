@@ -5,21 +5,33 @@ function clampByte(n: number) {
   return n < 0 ? 0 : n > 255 ? 255 : n | 0;
 }
 
-function substrateFor(material: string): [number, number, number] {
+export function substrateFor(material: string): [number, number, number] {
   const m = material.toLowerCase();
   if (m.includes("brass") || m.includes("gold")) return [196, 154, 72];
-  if (m.includes("wood") || m.includes("kraft") || m.includes("cardboard")) return [62, 38, 22];
+  if (m.includes("wood") || m.includes("kraft") || m.includes("cardboard") || m.includes("paper"))
+    return [62, 38, 22];
   if (m.includes("crystal") || m.includes("glass")) return [210, 220, 228];
   if (m.includes("stainless") || m.includes("steel")) return [176, 182, 188];
   if (m.includes("aluminum") || m.includes("aluminium")) return [186, 190, 194];
   if (m.includes("silver")) return [198, 202, 206];
-  // coated black metal — laser reveals aluminum
+  if (m.includes("ceramic")) return [236, 232, 224];
+  if (m.includes("plastic") || m.includes("polymer") || m.includes("pet")) return [210, 210, 214];
   return [214, 218, 222];
 }
 
+function proud(method: MethodId) {
+  return method === "uv_print" || method === "uv_dtf" || method === "embroidery";
+}
+
+function weave(method: MethodId) {
+  return method === "uv_dtf" || method === "embroidery";
+}
+
 /**
- * Composite a warped logo layer onto the product using a real decoration method.
- * Laser reads as substrate change. UV print / sublimation / UV DTF / embroidery are ink or thread.
+ * Composite a warped logo using a real decoration method.
+ * Highlight and shadow are one signed lighting term split into halves —
+ * opposite edges are always opposite by construction.
+ * Spatial frequencies scale with image size.
  */
 export function compositeDecoration(
   ctx: CanvasRenderingContext2D,
@@ -55,6 +67,20 @@ export function compositeDecoration(
   const P = pd.data;
   const O = out.data;
 
+  const step = Math.max(1, Math.round(Math.min(w, h) / 700));
+  const grainPeriod = Math.max(3, Math.round(w / 90));
+  const stitchU = 42;
+  const stitchV = 7;
+  const mat = material.toLowerCase();
+  const anisotropic = mat.includes("brushed") || mat.includes("aluminum") || mat.includes("stainless");
+  const ceramic = mat.includes("ceramic");
+  const crystal = mat.includes("crystal") || mat.includes("glass");
+  const matte = mat.includes("plastic") || mat.includes("matte") || mat.includes("paper") || mat.includes("cardboard");
+  const [sr, sg, sb] = substrateFor(material);
+  const amt = Math.max(0.15, Math.min(1, opacity));
+  const isProud = proud(method);
+  const isWeave = weave(method);
+
   let lumSum = 0;
   let lumN = 0;
   for (let y = minY; y < maxY; y++) {
@@ -67,10 +93,9 @@ export function compositeDecoration(
   }
   const meanLum = lumN ? lumSum / lumN / 255 : 0.2;
   const darkMark = meanLum < 0.55;
-  const [sr, sg, sb] = substrateFor(material);
-  const amt = Math.max(0.15, Math.min(1, opacity));
 
   const etchAt = (x: number, y: number) => {
+    if (x < 0 || y < 0 || x >= w || y >= h) return 0;
     const i = (y * w + x) * 4;
     const a = M[i + 3]! / 255;
     if (a < 0.02) return 0;
@@ -83,51 +108,85 @@ export function compositeDecoration(
     for (let x = minX; x < maxX; x++) {
       const i = (y * w + x) * 4;
       const a0 = M[i + 3]!;
-      if (a0 < 4) continue;
-      const etch = etchAt(x, y) * amt;
-      if (etch < 0.02) continue;
       let pr = P[i]!;
       let pg = P[i + 1]!;
       let pb = P[i + 2]!;
+
+      if (isProud && a0 < 10) {
+        const n = etchAt(x - step, y - step);
+        if (n > 0.08) {
+          const s = n * 0.22;
+          pr *= 1 - s;
+          pg *= 1 - s;
+          pb *= 1 - s;
+          O[i] = clampByte(pr);
+          O[i + 1] = clampByte(pg);
+          O[i + 2] = clampByte(pb);
+        }
+        continue;
+      }
+
+      const etch = etchAt(x, y) * amt;
+      if (etch < 0.02) continue;
       const lr = M[i]!;
       const lg = M[i + 1]!;
       const lb = M[i + 2]!;
 
       if (method === "laser_engrave") {
-        const eL = etchAt(x - 1, y);
-        const eR = etchAt(x + 1, y);
-        const eU = etchAt(x, y - 1);
-        const eD = etchAt(x, y + 1);
+        const eL = etchAt(x - step, y);
+        const eR = etchAt(x + step, y);
+        const eU = etchAt(x, y - step);
+        const eD = etchAt(x, y + step);
         const gx = eR - eL;
         const gy = eD - eU;
-        const inner = Math.max(0, -gx * 0.6 - gy * 0.8);
-        const spec = Math.max(0, gx * 0.35 - gy * 0.7);
-        const t = Math.min(1, etch * 1.2);
-        pr = pr + (sr - pr) * t - inner * 50 + spec * 48;
-        pg = pg + (sg - pg) * t - inner * 50 + spec * 44;
-        pb = pb + (sb - pb) * t - inner * 44 + spec * 52;
-      } else if (method === "sublimation") {
-        const t = (a0 / 255) * amt * 0.9;
+        const signed = gx * -0.55 + gy * -0.8;
+        const spec = Math.max(0, signed);
+        const inner = Math.max(0, -signed);
+        let t = Math.min(1, etch * 1.2);
+        if (anisotropic) {
+          const grain = 0.82 + 0.18 * Math.sin((y / grainPeriod) * Math.PI * 2);
+          t *= grain;
+        }
+        if (crystal) {
+          const refr = 0.9 + 0.1 * Math.sin((x / w) * 18 + (y / h) * 9);
+          t *= refr;
+        }
+        const specGain = matte ? 8 : ceramic ? 62 : crystal ? 70 : 48;
+        pr = pr + (sr - pr) * t - inner * 50 + spec * specGain;
+        pg = pg + (sg - pg) * t - inner * 50 + spec * (specGain * 0.92);
+        pb = pb + (sb - pb) * t - inner * 44 + spec * (specGain * 1.08);
+      } else {
+        let t = (a0 / 255) * amt;
+        if (method === "sublimation") t *= 0.9;
+        if (method === "uv_print") t *= 0.96;
+        if (isWeave) {
+          const wx = Math.sin((x / w) * stitchU * Math.PI);
+          const wy = Math.sin((y / h) * stitchV * Math.PI);
+          const fabric = 0.86 + 0.14 * wx * wy;
+          t *= fabric;
+        }
+        if (ceramic && method === "sublimation") {
+          const gloss = 1 + 0.06 * Math.max(0, 0.5 - (y / h - 0.35) * (y / h - 0.35) * 8);
+          t *= Math.min(1, gloss);
+        }
         pr = pr + (lr - pr) * t;
         pg = pg + (lg - pg) * t;
         pb = pb + (lb - pb) * t;
-      } else if (method === "uv_print") {
-        const t = (a0 / 255) * amt * 0.96;
-        pr = pr + (lr - pr) * t;
-        pg = pg + (lg - pg) * t;
-        pb = pb + (lb - pb) * t;
-      } else if (method === "uv_dtf") {
-        const t = (a0 / 255) * amt;
-        const e = etchAt(x, y) - etchAt(x - 1, y - 1);
-        pr = pr + (lr - pr) * t + Math.max(0, e) * 18;
-        pg = pg + (lg - pg) * t + Math.max(0, e) * 18;
-        pb = pb + (lb - pb) * t + Math.max(0, e) * 16;
-      } else if (method === "embroidery") {
-        const stitch = 0.82 + 0.18 * Math.sin(x * 0.9 + y * 0.12);
-        const t = (a0 / 255) * amt;
-        pr = pr + (lr * stitch - pr) * t;
-        pg = pg + (lg * stitch - pg) * t;
-        pb = pb + (lb * stitch - pb) * t;
+        if (method === "uv_dtf") {
+          const eL = etchAt(x - step, y);
+          const eU = etchAt(x, y - step);
+          const signed = (etchAt(x, y) - eL) * -0.55 + (etchAt(x, y) - eU) * -0.8;
+          const spec = Math.max(0, signed);
+          pr += spec * 16;
+          pg += spec * 16;
+          pb += spec * 14;
+        }
+        if (method === "embroidery") {
+          const stitch = 0.82 + 0.18 * Math.sin((x / w) * 56 + (y / h) * 8);
+          pr = pr * (1 - t) + lr * stitch * t;
+          pg = pg * (1 - t) + lg * stitch * t;
+          pb = pb * (1 - t) + lb * stitch * t;
+        }
       }
 
       O[i] = clampByte(pr);

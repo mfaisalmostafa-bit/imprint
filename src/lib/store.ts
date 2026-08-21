@@ -21,6 +21,7 @@ import type { DetectResult } from "./detect";
 import type { MethodId } from "./methods";
 import type { Treatment } from "./treat";
 import type { JobKind } from "./cc";
+import { recallPlacement, rememberPlacement } from "./placement-memory";
 
 export type LogoAsset = {
   id: string;
@@ -141,6 +142,7 @@ type StudioState = {
   setJobKind: (k: JobKind) => void;
   setJobRef: (s: string) => void;
   setCompare: (v: boolean) => void;
+  rememberNow: () => void;
 };
 
 export type CustomView = {
@@ -287,23 +289,24 @@ export const useStudio = create<StudioState>((set, get) => ({
     const m = MOCKUPS.find((x) => x.id === id);
     if (!m) return;
     const prev = get();
+    const mem = recallPlacement(m.sku);
     set({
       mockupId: m.id,
       customQuad: prev.mockupId === "custom" ? cloneQuad(prev.quad) : prev.customQuad,
-      quad: cloneQuad(m.quad),
+      quad: mem ? cloneQuad(mem.quad) : cloneQuad(m.quad),
       blend: m.blend,
-      wrap: m.wrap,
-      cylinderArc: m.cylinderArc,
+      wrap: mem?.wrap ?? m.wrap,
+      cylinderArc: mem?.cylinderArc ?? m.cylinderArc,
       lighting: m.invert ? 0.32 : 0.52,
       invert: m.invert,
       surfaceLabel: m.surface,
       material: m.material,
       confidence: 1,
-      brainNote: "Catalog plane — corners and the mark are live.",
+      brainNote: mem ? "Placement recalled for this SKU." : "Catalog plane — corners and the mark are live.",
       scanError: null,
-      offsetX: 0,
-      offsetY: apparelOffset(m.id),
-      scale: m.scale,
+      offsetX: mem?.offsetX ?? 0,
+      offsetY: mem?.offsetY ?? apparelOffset(m.id),
+      scale: mem?.scale ?? m.scale,
       method: m.defaultMethod,
       mode: "studio",
     });
@@ -466,4 +469,16 @@ export const useStudio = create<StudioState>((set, get) => ({
   setJobKind: (k) => set({ jobKind: k }),
   setJobRef: (s) => set({ jobRef: s }),
   setCompare: (v) => set({ compare: v }),
+  rememberNow: () => {
+    const s = get();
+    const sku = "sku" in s.mockup() ? s.mockup().sku : "";
+    rememberPlacement(sku, {
+      quad: s.quad,
+      scale: s.scale,
+      offsetX: s.offsetX,
+      offsetY: s.offsetY,
+      wrap: s.wrap,
+      cylinderArc: s.cylinderArc,
+    });
+  },
 }));

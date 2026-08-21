@@ -35,7 +35,7 @@ export function GenerateBar({
           ref={inputRef}
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
-          placeholder="Imagine a blank product to print on…"
+          placeholder="Concept still only — never used on a client proof"
           maxLength={400}
           className="h-11 min-w-0 flex-1 rounded-md bg-secondary px-3 text-sm text-foreground outline-none placeholder:text-muted-foreground"
         />

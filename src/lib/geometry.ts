@@ -325,3 +325,23 @@ export function cylinderSrcU(destU: number, arcRad: number): number {
   const theta = Math.asin(inner);
   return clamp((theta / maxT + 1) / 2, 0, 1);
 }
+
+/** Taper / cone / sphere — dest UV in, source UV out. Spatial, not pixel constants. */
+export function wrapSrcUV(
+  u: number,
+  v: number,
+  mode: "plane" | "cylinder" | "taper" | "cone" | "sphere",
+  arc: number,
+): { u: number; v: number } {
+  if (mode === "plane") return { u, v };
+  if (mode === "cylinder") return { u: cylinderSrcU(u, arc), v };
+  if (mode === "taper") {
+    const width = 0.4 + 0.6 * v;
+    return { u: cylinderSrcU(u, arc * width), v };
+  }
+  if (mode === "cone") {
+    const width = 0.35 + 0.65 * (1 - v);
+    return { u: cylinderSrcU(u, arc * width), v };
+  }
+  return { u: cylinderSrcU(u, arc), v: cylinderSrcU(v, arc * 0.85) };
+}

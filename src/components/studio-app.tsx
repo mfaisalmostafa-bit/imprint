@@ -14,10 +14,13 @@ import { compressForEdit } from "@/lib/image";
 import { detectSurface } from "@/lib/detect";
 import { generateProduct, imagineEdit } from "@/lib/imagine";
 import { listClients, saveProof } from "@/lib/cc";
-import { downloadProofPdf } from "@/lib/pdf";
-import { inspectPlacement } from "@/lib/qc";
+import { downloadProofPdf, downloadOrderPdf } from "@/lib/pdf";
+import { inspectPlacement, inspectSubstrate } from "@/lib/qc";
 import { METHODS } from "@/lib/methods";
 import type { JobKind } from "@/lib/cc";
+import { formatMarkSize, markSizeMm } from "@/lib/mark-size";
+import { loadOrder } from "@/lib/order";
+import { MOCKUPS } from "@/lib/mockups";
 
 export function StudioApp() {
   const stageRef = useRef<StageHandle>(null);
@@ -105,6 +108,10 @@ export function StudioApp() {
   };
 
   const onPdf = async () => {
+    if (mockupId === "custom") {
+      toast("Concept photos cannot be invoiced. Pick a catalogue SKU.");
+      return;
+    }
     const frames = await stageRef.current?.getFrames();
     if (!frames) {
       toast("Stage not ready");
@@ -121,6 +128,18 @@ export function StudioApp() {
       productTone: "tone" in mockup ? mockup.tone : "mid",
       invert,
     });
+    const hold = inspectSubstrate({
+      method,
+      material: "material" in mockup ? mockup.material : "",
+      category: "category" in mockup ? String(mockup.category) : "",
+    });
+    const mm = markSizeMm({
+      printWmm: "printWmm" in mockup ? mockup.printWmm : 80,
+      printHmm: "printHmm" in mockup ? mockup.printHmm : 80,
+      scale,
+      logoAspect: 1.6,
+    });
+    const markSize = formatMarkSize(mm.w, mm.h, mockup.surface);
     await downloadProofPdf({
       client: client?.name ?? "Walk-in",
       jobKind,
@@ -130,13 +149,80 @@ export function StudioApp() {
       method,
       original: frames.original,
       branded: frames.branded,
-      qc: flags.map((f) => f.text),
-      settings: `v1  ${method}  scale ${Math.round(scale * 100)}%  ${"substrate" in mockup ? mockup.substrate : ""}`,
+      qc: [...flags, ...hold].map((f) => f.text),
+      settings: `${method}  ${markSize}  ${"substrate" in mockup ? mockup.substrate : ""}`,
+      markSize,
     });
     toast("Branded PDF downloaded");
   };
 
+  const onOrderPdf = async () => {
+    const lines = loadOrder().filter((l) => l.proofEligible);
+    if (!lines.length) {
+      toast("Add catalogue SKUs to the order first");
+      return;
+    }
+    const current = mockupId;
+    const currentMethod = method;
+    const client = listClients().find((c) => c.id === clientId);
+    const pages = [];
+    for (const line of lines) {
+      const m = MOCKUPS.find((x) => x.sku === line.sku);
+      if (!m) continue;
+      useStudio.getState().selectMockup(m.id);
+      if (m.methods.includes(line.method)) useStudio.getState().setMethod(line.method);
+      await new Promise((r) => setTimeout(r, 350));
+      const frames = await stageRef.current?.getFrames();
+      if (!frames) continue;
+      const st = useStudio.getState();
+      const mm = markSizeMm({
+        printWmm: m.printWmm,
+        printHmm: m.printHmm,
+        scale: st.scale,
+        logoAspect: 1.6,
+      });
+      pages.push({
+        sku: line.sku,
+        skuName: line.name,
+        method: st.method,
+        qty: line.qty,
+        notes: line.notes,
+        markSize: formatMarkSize(mm.w, mm.h, m.surface),
+        original: frames.original,
+        branded: frames.branded,
+        qc: inspectPlacement({
+          scale: st.scale,
+          maxScale: m.maxScale,
+          quad: st.quad,
+          method: st.method,
+          allowed: m.methods,
+          productTone: m.tone,
+          invert: st.invert,
+        }).map((f) => f.text),
+        settings: `${st.method}  qty ${line.qty}`,
+      });
+    }
+    if (current === "custom") useStudio.getState().selectCustom();
+    else useStudio.getState().selectMockup(current);
+    useStudio.getState().setMethod(currentMethod);
+    if (!pages.length) {
+      toast("No catalogue photos for those lines");
+      return;
+    }
+    await downloadOrderPdf({
+      client: client?.name ?? "Walk-in",
+      jobKind,
+      jobRef,
+      pages,
+    });
+    toast(`Order PDF · ${pages.length} products`);
+  };
+
   const onApprove = async () => {
+    if (mockupId === "custom") {
+      toast("Concept photos cannot be invoiced. Pick a catalogue SKU.");
+      return;
+    }
     const frames = await stageRef.current?.getFrames();
     if (!frames) return;
     const sku = "sku" in mockup ? mockup.sku : "CUSTOM";
@@ -339,6 +425,9 @@ export function StudioApp() {
           <Button variant="secondary" size="sm" onClick={() => void onPdf()}>
             <FileText />
             PDF
+          </Button>
+          <Button variant="secondary" size="sm" onClick={() => void onOrderPdf()}>
+            Order PDF
           </Button>
           <Button variant="secondary" size="sm" onClick={() => void onApprove()}>
             <Check />

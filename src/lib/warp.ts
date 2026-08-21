@@ -1,12 +1,13 @@
 import {
   applyMat3,
-  cylinderSrcU,
+  wrapSrcUV,
   homography,
   invertMat3,
   type Point,
   type Quad,
   UNIT_QUAD,
 } from "./geometry";
+import type { WrapMode } from "./mockups";
 
 function fillTexturedTriangle(
   ctx: CanvasRenderingContext2D,
@@ -70,7 +71,7 @@ function outset(p: Point, c: Point, px: number): Point {
 
 export type WarpOpts = {
   subdivisions?: number;
-  wrap?: "plane" | "cylinder";
+  wrap?: WrapMode;
   cylinderArc?: number;
 };
 
@@ -93,8 +94,8 @@ export function warpImageToQuad(
   }
 
   const srcAt = (u: number, v: number): Point => {
-    const su = wrap === "cylinder" ? cylinderSrcU(u, arc) : u;
-    return { x: su * srcW, y: v * srcH };
+    const s = wrapSrcUV(u, v, wrap, arc);
+    return { x: s.u * srcW, y: s.v * srcH };
   };
   const dstAt = (u: number, v: number): Point => applyMat3(H, u, v);
 
@@ -182,7 +183,7 @@ export function applySurfaceLighting(
 export function finishPrint(
   layer: HTMLCanvasElement,
   destQuad: Quad,
-  wrap: "plane" | "cylinder",
+  wrap: WrapMode,
   cylinderArc: number,
 ) {
   const w = layer.width;
@@ -216,9 +217,13 @@ export function finishPrint(
       const edgeV = Math.min(uv.y, 1 - uv.y);
       const feather = Math.max(0, Math.min(1, Math.min(edgeU, edgeV) / 0.045));
       let shade = 1;
-      if (wrap === "cylinder") {
+      if (wrap !== "plane") {
         const xN = (uv.x - 0.5) * 2;
         shade = 0.55 + 0.45 * Math.cos(xN * (arc / 2));
+        if (wrap === "sphere") {
+          const yN = (uv.y - 0.5) * 2;
+          shade *= 0.7 + 0.3 * Math.cos(yN * (arc / 2));
+        }
       }
       d[i] = Math.min(255, d[i]! * shade);
       d[i + 1] = Math.min(255, d[i + 1]! * shade);

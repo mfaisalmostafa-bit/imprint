@@ -65,24 +65,22 @@ function chevron(pdf: jsPDF, y: number, W: number) {
   }
 }
 
-export async function downloadProofPdf(opts: {
-  client: string;
-  jobKind: string;
-  jobRef: string;
+export type ProofPage = {
   sku: string;
   skuName: string;
   method: MethodId;
+  qty?: number;
+  notes?: string;
+  markSize: string;
   original: HTMLCanvasElement;
   branded: HTMLCanvasElement;
   qc: string[];
   settings: string;
-}) {
-  const pdf = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
-  const W = 297;
-  const H = 210;
-  const mont = await ensureMontserrat(pdf);
-  const face = mont ? "Montserrat" : "helvetica";
+};
 
+type PdfFace = string;
+
+function header(pdf: jsPDF, face: PdfFace, W: number, client: string, jobKind: string, jobRef: string) {
   pdf.setFillColor(nr, ng, nb);
   pdf.rect(0, 0, W, 28, "F");
   pdf.setFillColor(or, og, ob);
@@ -97,43 +95,17 @@ export async function downloadProofPdf(opts: {
   pdf.setFontSize(9);
   pdf.text(TPX_WEB, W - 12, 13, { align: "right" });
   pdf.text(new Date().toISOString().slice(0, 10), W - 12, 21, { align: "right" });
-
   pdf.setTextColor(nr, ng, nb);
   pdf.setFont(face, "bold");
   pdf.setFontSize(11);
-  pdf.text(opts.client, 12, 38);
+  pdf.text(client, 12, 38);
   pdf.setFont(face, "normal");
   pdf.setFontSize(9);
   pdf.setTextColor(80, 86, 96);
-  pdf.text(
-    `${opts.jobKind.toUpperCase()}  ${opts.jobRef || "—"}   ·   ${opts.sku}  ${opts.skuName}   ·   ${METHODS[opts.method].label}`,
-    12,
-    45,
-  );
+  pdf.text(`${jobKind.toUpperCase()}  ${jobRef || "—"}`, 12, 45);
+}
 
-  const toUrl = (c: HTMLCanvasElement) => c.toDataURL("image/jpeg", 0.92);
-  const fit = (c: HTMLCanvasElement, boxW: number, boxH: number) => {
-    const r = Math.min(boxW / c.width, boxH / c.height);
-    return { w: c.width * r, h: c.height * r };
-  };
-  const left = fit(opts.original, 128, 108);
-  const right = fit(opts.branded, 128, 108);
-  pdf.addImage(toUrl(opts.original), "JPEG", 12, 52, left.w, left.h);
-  pdf.addImage(toUrl(opts.branded), "JPEG", 12 + 136, 52, right.w, right.h);
-  pdf.setFontSize(8);
-  pdf.setTextColor(nr, ng, nb);
-  pdf.text("SKU photo", 12, 52 + left.h + 5);
-  pdf.text("Branded proof", 12 + 136, 52 + right.h + 5);
-
-  pdf.setFontSize(8);
-  pdf.setTextColor(80, 86, 96);
-  const notes = opts.qc.length ? opts.qc : ["No QC flags. Print-safe."];
-  notes.slice(0, 3).forEach((n, i) => {
-    pdf.text(`·  ${n}`, 12, 170 + i * 4.5);
-  });
-  pdf.setFontSize(7);
-  pdf.text(opts.settings, 12, H - 22);
-
+function footer(pdf: jsPDF, face: PdfFace, W: number, H: number) {
   chevron(pdf, H - 16, W);
   pdf.setFont(face, "bold");
   pdf.setFontSize(9);
@@ -142,6 +114,134 @@ export async function downloadProofPdf(opts: {
   pdf.setFont(face, "normal");
   pdf.setFontSize(7);
   pdf.text(TPX_CONTACT, W / 2, H - 5, { align: "center" });
+}
 
-  pdf.save(`TPX-${opts.sku}-${opts.jobRef || "proof"}.pdf`);
+function drawProductPage(
+  pdf: jsPDF,
+  face: PdfFace,
+  W: number,
+  H: number,
+  client: string,
+  jobKind: string,
+  jobRef: string,
+  page: ProofPage,
+) {
+  header(pdf, face, W, client, jobKind, jobRef);
+  pdf.setTextColor(nr, ng, nb);
+  pdf.setFont(face, "bold");
+  pdf.setFontSize(11);
+  const qty = page.qty ? `  ·  qty ${page.qty}` : "";
+  pdf.text(`${page.sku}  ${page.skuName}${qty}`, 12, 54);
+  pdf.setFont(face, "normal");
+  pdf.setFontSize(9);
+  pdf.setTextColor(or, og, ob);
+  pdf.text(METHODS[page.method].label, 12, 60);
+  pdf.setTextColor(80, 86, 96);
+  pdf.text(page.markSize, 12, 66);
+
+  const toUrl = (c: HTMLCanvasElement) => c.toDataURL("image/jpeg", 0.92);
+  const fit = (c: HTMLCanvasElement, boxW: number, boxH: number) => {
+    const r = Math.min(boxW / c.width, boxH / c.height);
+    return { w: c.width * r, h: c.height * r };
+  };
+  const left = fit(page.original, 128, 96);
+  const right = fit(page.branded, 128, 96);
+  pdf.addImage(toUrl(page.original), "JPEG", 12, 70, left.w, left.h);
+  pdf.addImage(toUrl(page.branded), "JPEG", 12 + 136, 70, right.w, right.h);
+  pdf.setFontSize(8);
+  pdf.setTextColor(nr, ng, nb);
+  pdf.text("Before — catalogue photo", 12, 70 + left.h + 5);
+  pdf.text("After — branded proof", 12 + 136, 70 + right.h + 5);
+
+  pdf.setFontSize(8);
+  pdf.setTextColor(80, 86, 96);
+  const notes = page.qc.length ? page.qc : ["No QC flags. Print-safe."];
+  notes.slice(0, 3).forEach((n, i) => {
+    pdf.text(`·  ${n}`, 12, 176 + i * 4.5);
+  });
+  if (page.notes) {
+    pdf.text(page.notes, 12, H - 22);
+  } else {
+    pdf.setFontSize(7);
+    pdf.text(page.settings, 12, H - 22);
+  }
+  footer(pdf, face, W, H);
+}
+
+export async function downloadProofPdf(opts: {
+  client: string;
+  jobKind: string;
+  jobRef: string;
+  sku: string;
+  skuName: string;
+  method: MethodId;
+  original: HTMLCanvasElement;
+  branded: HTMLCanvasElement;
+  qc: string[];
+  settings: string;
+  markSize?: string;
+}) {
+  await downloadOrderPdf({
+    client: opts.client,
+    jobKind: opts.jobKind,
+    jobRef: opts.jobRef,
+    pages: [
+      {
+        sku: opts.sku,
+        skuName: opts.skuName,
+        method: opts.method,
+        markSize: opts.markSize ?? opts.settings,
+        original: opts.original,
+        branded: opts.branded,
+        qc: opts.qc,
+        settings: opts.settings,
+      },
+    ],
+  });
+}
+
+export async function downloadOrderPdf(opts: {
+  client: string;
+  jobKind: string;
+  jobRef: string;
+  pages: ProofPage[];
+}) {
+  const pdf = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+  const W = 297;
+  const H = 210;
+  const mont = await ensureMontserrat(pdf);
+  const face = mont ? "Montserrat" : "helvetica";
+
+  pdf.setFillColor(nr, ng, nb);
+  pdf.rect(0, 0, W, H, "F");
+  pdf.setTextColor(or, og, ob);
+  pdf.setFont(face, "bold");
+  pdf.setFontSize(28);
+  pdf.text("TePee-X", W / 2, 78, { align: "center" });
+  pdf.setTextColor(244, 241, 234);
+  pdf.setFont(face, "normal");
+  pdf.setFontSize(16);
+  pdf.text("Product mockups", W / 2, 94, { align: "center" });
+  pdf.setFont(face, "bold");
+  pdf.setFontSize(14);
+  pdf.text(opts.client, W / 2, 114, { align: "center" });
+  pdf.setFont(face, "normal");
+  pdf.setFontSize(11);
+  pdf.text(`${opts.jobKind.toUpperCase()}  ${opts.jobRef || "—"}  ·  ${opts.pages.length} lines`, W / 2, 126, {
+    align: "center",
+  });
+  pdf.setTextColor(or, og, ob);
+  pdf.setFontSize(9);
+  pdf.text(TPX_CONTACT, W / 2, H - 28, { align: "center" });
+
+  for (const page of opts.pages) {
+    pdf.addPage("a4", "landscape");
+    drawProductPage(pdf, face, W, H, opts.client, opts.jobKind, opts.jobRef, page);
+  }
+
+  const name =
+    opts.pages.length > 1
+      ? `TPX-${opts.jobRef || "order"}-proof.pdf`
+      : `TPX-${opts.pages[0]?.sku ?? "sku"}-${opts.jobRef || "proof"}.pdf`;
+  pdf.save(name);
 }

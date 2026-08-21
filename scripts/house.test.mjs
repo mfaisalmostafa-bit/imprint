@@ -81,15 +81,19 @@ test("proof PDF uses house navy / orange and contact", () => {
   assert.match(files.styles, /#d1812e/i);
 });
 
-test("treat.ts swatches are the locked pair, never the old fake navy/orange", () => {
-  const treat = readFileSync("src/lib/treat.ts", "utf8");
-  assert.match(treat, /\[4, 38, 63\]/);
-  assert.match(treat, /\[209, 129, 46\]/);
+test("treat.ts swatches come from brand.ts, never a second navy", () => {
+  const treat = files.treat;
+  assert.match(treat, /from "\.\/brand"/);
+  assert.match(treat, /TPX_NAVY_RGB/);
+  assert.match(treat, /TPX_ORANGE_RGB/);
+  assert.doesNotMatch(treat, /\[4, 38, 63\]/);
+  assert.doesNotMatch(treat, /\[209, 129, 46\]/);
   assert.doesNotMatch(treat, /\[11,\s*31,\s*58\]/);
   assert.doesNotMatch(treat, /\[232,\s*93,\s*4\]/);
   assert.match(treat, /knockoutDarkNeutral/);
   assert.match(treat, /keySolidBackground/);
   assert.match(treat, /houseTreatPrint/);
+  assert.match(treat, /toneOnTone/);
 });
 
 test("totem SKU exists and quotes UV Printing", () => {
@@ -98,10 +102,36 @@ test("totem SKU exists and quotes UV Printing", () => {
   assert.match(block, /defaultMethod: "uv_print"/);
 });
 
+test("methods are exactly the five TePee-X sells", () => {
+  const ids = [...files.methods.matchAll(/id: "([a-z_]+)"/g)].map((m) => m[1]);
+  assert.deepEqual(
+    [...new Set(ids)],
+    ["laser_engrave", "uv_print", "uv_dtf", "sublimation", "embroidery"],
+  );
+});
 
-test("one-colour swatches use locked house navy / orange", () => {
-  assert.match(files.treat, /\[4, 38, 63\]/);
-  assert.match(files.treat, /\[209, 129, 46\]/);
-  assert.doesNotMatch(files.treat, /11,\s*31,\s*58/);
-  assert.doesNotMatch(files.treat, /232,\s*93,\s*4/);
+test("no supplier names in client-visible copy", () => {
+  const src = files.mockups + files.methods + files.brand;
+  assert.doesNotMatch(src, /Parker|Pilot|BIC|Midocean|PfConcept|Hartmann/i);
+});
+
+test("etch uses one signed lighting term", () => {
+  const etch = readFileSync("src/lib/etch.ts", "utf8");
+  assert.match(etch, /const signed = /);
+  assert.match(etch, /Math\.max\(0, signed\)/);
+  assert.match(etch, /Math\.max\(0, -signed\)/);
+});
+
+test("catalogue layer is searchable and read-only", () => {
+  const cat = readFileSync("src/lib/catalog.ts", "utf8");
+  assert.match(cat, /searchCatalog/);
+  assert.match(cat, /pickFrontImage/);
+  assert.match(cat, /proofEligible/);
+  assert.doesNotMatch(cat, /localStorage\.setItem/);
+});
+
+test("placement memory persists per SKU", () => {
+  const mem = readFileSync("src/lib/placement-memory.ts", "utf8");
+  assert.match(mem, /rememberPlacement/);
+  assert.match(mem, /recallPlacement/);
 });

@@ -280,6 +280,7 @@ export const StageCanvas = forwardRef<StageHandle>(function StageCanvas(_, ref) 
     dragIndex.current = -1;
     moveDrag.current = null;
     setDragging(false);
+    useStudio.getState().rememberNow();
     try {
       e.currentTarget.releasePointerCapture(e.pointerId);
     } catch {

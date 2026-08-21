@@ -2,7 +2,7 @@ import type { Quad } from "./geometry";
 import type { MethodId } from "./methods";
 
 export type BlendMode = "source-over" | "multiply" | "screen" | "overlay" | "soft-light";
-export type WrapMode = "plane" | "cylinder";
+export type WrapMode = "plane" | "cylinder" | "taper" | "cone" | "sphere";
 export type SurfaceTone = "light" | "mid" | "dark";
 export type Category =
   | "Apparel"
@@ -71,8 +71,8 @@ export const MOCKUPS: Mockup[] = [
     name: "Stainless flask 8oz",
     category: "Drinkware",
     src: "/mockups/flask.jpg",
-    wrap: "plane",
-    cylinderArc: 0.4,
+    wrap: "taper",
+    cylinderArc: 0.85,
     quad: [
       { x: 0.34, y: 0.22 },
       { x: 0.66, y: 0.22 },
@@ -206,8 +206,8 @@ export const MOCKUPS: Mockup[] = [
     name: "Paper cup",
     category: "Drinkware",
     src: "/mockups/cup.jpg",
-    wrap: "cylinder",
-    cylinderArc: 1.45,
+    wrap: "cone",
+    cylinderArc: 1.35,
     quad: [
       { x: 0.30, y: 0.28 },
       { x: 0.68, y: 0.30 },

@@ -1,10 +1,19 @@
 import type { MethodId } from "./methods";
+import { TPX_NAVY_RGB, TPX_ORANGE_RGB } from "./brand";
 
-export type Treatment = "auto" | "full" | "knockout" | "one_color";
+export type Treatment = "auto" | "full" | "knockout" | "one_color" | "tone";
 
-/** Locked house pair — the values that actually recolour a client's mark. */
-export const SPOT_NAVY: [number, number, number] = [4, 38, 63];
-export const SPOT_ORANGE: [number, number, number] = [209, 129, 46];
+/** Locked house pair — always from brand.ts, never a second navy. */
+export const SPOT_NAVY: [number, number, number] = [
+  TPX_NAVY_RGB[0],
+  TPX_NAVY_RGB[1],
+  TPX_NAVY_RGB[2],
+];
+export const SPOT_ORANGE: [number, number, number] = [
+  TPX_ORANGE_RGB[0],
+  TPX_ORANGE_RGB[1],
+  TPX_ORANGE_RGB[2],
+];
 
 export const SPOT_SWATCHES: { id: string; label: string; rgb: [number, number, number] }[] = [
   { id: "navy", label: "TPX Navy", rgb: SPOT_NAVY },
@@ -185,15 +194,40 @@ export function houseTreatPrint(
   if (mono && neutral && stats.lum > 205) recolorSolid(data, [20, 20, 20]);
 }
 
+/** Substrate hue, luminance-shifted — kraft, silicone, tone-on-tone print. */
+export function toneOnTone(
+  data: ImageData,
+  substrate: [number, number, number],
+  lum: number,
+) {
+  const rgb: [number, number, number] =
+    lum > 110
+      ? [
+          Math.max(0, substrate[0] * 0.68),
+          Math.max(0, substrate[1] * 0.68),
+          Math.max(0, substrate[2] * 0.68),
+        ]
+      : [
+          Math.min(255, substrate[0] * 1.4 + 34),
+          Math.min(255, substrate[1] * 1.4 + 34),
+          Math.min(255, substrate[2] * 1.4 + 34),
+        ];
+  recolorSolid(data, rgb);
+}
+
 export function applyTreatment(
   data: ImageData,
   treatment: Treatment,
   spot: [number, number, number],
-  house?: { substrateLum: number; method: MethodId },
+  house?: { substrateLum: number; method: MethodId; substrateRgb?: [number, number, number] },
 ) {
   prepareLogo(data);
   if (treatment === "one_color") {
     recolorSolid(data, spot);
+    return;
+  }
+  if (treatment === "tone") {
+    toneOnTone(data, house?.substrateRgb ?? [140, 110, 80], house?.substrateLum ?? 140);
     return;
   }
   if (treatment === "full" || treatment === "knockout") return;

@@ -2,6 +2,7 @@ import type { MethodId } from "./methods";
 import { METHODS } from "./methods";
 import type { Quad } from "./geometry";
 import { poseFromQuad, quadArea } from "./geometry";
+import { logoDpi } from "./mark-size";
 
 export type QcFlag = {
   level: "warn" | "block";
@@ -25,6 +26,90 @@ export function inspectLogo(img: HTMLImageElement | null, naturalHint?: { w: num
       level: "block",
       code: "unusable",
       text: "Logo is too small to proof. Request a vector or 1000px+ PNG.",
+    });
+  }
+  return flags;
+}
+
+export function inspectPrintSize(opts: {
+  logoPxW: number;
+  markWmm: number;
+  markHmm: number;
+  scale: number;
+  maxScale: number;
+}): QcFlag[] {
+  const flags: QcFlag[] = [];
+  const dpi = logoDpi(opts.logoPxW, opts.markWmm);
+  if (opts.logoPxW > 0 && dpi > 0 && dpi < 100) {
+    flags.push({
+      level: "block",
+      code: "dpi",
+      text: `Logo is ${Math.round(dpi)} dpi at ${opts.markWmm} mm wide. Under 100 dpi will pixelate. Request vector.`,
+    });
+  } else if (opts.logoPxW > 0 && dpi > 0 && dpi < 150) {
+    flags.push({
+      level: "warn",
+      code: "dpi",
+      text: `Logo is ${Math.round(dpi)} dpi at ${opts.markWmm} mm. Soft on press — 300 dpi is print-safe.`,
+    });
+  }
+  if (opts.scale > opts.maxScale * 0.92) {
+    flags.push({
+      level: "warn",
+      code: "edge",
+      text: "Mark is close to a seam or edge of the print zone.",
+    });
+  }
+  return flags;
+}
+
+export function inspectSubstrate(opts: {
+  method: MethodId;
+  material: string;
+  category: string;
+}): QcFlag[] {
+  const flags: QcFlag[] = [];
+  const m = opts.material.toLowerCase();
+  const cat = opts.category.toLowerCase();
+  const textile = cat === "apparel" || m.includes("cotton") || m.includes("fleece") || m.includes("pique") || m.includes("twill") || m.includes("jersey");
+  const hard =
+    m.includes("metal") ||
+    m.includes("aluminum") ||
+    m.includes("steel") ||
+    m.includes("plastic") ||
+    m.includes("paper") ||
+    m.includes("cardboard") ||
+    m.includes("crystal") ||
+    cat === "packaging" ||
+    cat === "display" ||
+    cat === "tech" ||
+    cat === "writing";
+  if (opts.method === "uv_dtf" && hard && !textile) {
+    flags.push({
+      level: "block",
+      code: "hold",
+      text: "UV DTF is not quoted on hard goods. Use UV Printing.",
+    });
+  }
+  if (opts.method === "uv_print" && textile) {
+    flags.push({
+      level: "block",
+      code: "hold",
+      text: "Do not quote UV Printing on textiles. Non-embroidery apparel is UV DTF.",
+    });
+  }
+  if (opts.method === "laser_engrave" && (textile || m.includes("paper") || m.includes("cotton"))) {
+    flags.push({
+      level: "block",
+      code: "hold",
+      text: "Laser will not hold on this substrate.",
+    });
+  }
+  if (opts.method === "sublimation" && !m.includes("ceramic") && !m.includes("polymer") && !m.includes("coat")) {
+    flags.push({
+      level: "warn",
+      code: "hold",
+      text: "Sublimation needs a polymer coat. Confirm the substrate is sublimation-ready.",
     });
   }
   return flags;

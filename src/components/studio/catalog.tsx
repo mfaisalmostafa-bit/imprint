@@ -1,9 +1,10 @@
-import { MOCKUPS } from "@/lib/mockups";
+import { MOCKUPS, type Category } from "@/lib/mockups";
 import { useStudio } from "@/lib/store";
 import { detectSurface } from "@/lib/detect";
 import { cn } from "@/lib/utils";
 import { Camera } from "lucide-react";
-import { useRef } from "react";
+import { useMemo, useRef, useState } from "react";
+import { categoriesInCatalog, searchCatalog } from "@/lib/catalog";
 
 export function Catalog({ layout }: { layout: "side" | "row" }) {
   const mockupId = useStudio((s) => s.mockupId);
@@ -15,6 +16,13 @@ export function Catalog({ layout }: { layout: "side" | "row" }) {
   const applyScan = useStudio((s) => s.applyScan);
   const pushHistory = useStudio((s) => s.pushHistory);
   const fileRef = useRef<HTMLInputElement>(null);
+  const [q, setQ] = useState("");
+  const [cat, setCat] = useState<Category | "all">("all");
+
+  const hits = useMemo(() => searchCatalog({ q, category: cat }), [q, cat]);
+  const eligible = hits.filter((r) => r.proofEligible);
+  const pending = hits.filter((r) => !r.proofEligible).slice(0, 8);
+  const cats = categoriesInCatalog();
 
   const onFile = (file: File | undefined) => {
     if (!file || !file.type.startsWith("image/")) return;
@@ -39,8 +47,43 @@ export function Catalog({ layout }: { layout: "side" | "row" }) {
       )}
     >
       <p className={cn("text-xs font-medium uppercase tracking-wider text-muted-foreground", layout === "row" && "hidden")}>
-        SKUs
+        Catalogue
       </p>
+      <input
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+        placeholder="Search SKU…"
+        className={cn(
+          "h-9 rounded-md bg-secondary px-2 text-xs text-foreground outline-none",
+          layout === "row" && "hidden",
+        )}
+        aria-label="Search catalogue"
+      />
+      <div className={cn("flex flex-wrap gap-1", layout === "row" && "hidden")}>
+        <button
+          type="button"
+          onClick={() => setCat("all")}
+          className={cn(
+            "h-7 rounded-full px-2 text-[10px] uppercase tracking-wider",
+            cat === "all" ? "bg-primary text-primary-foreground" : "bg-secondary text-muted-foreground",
+          )}
+        >
+          All
+        </button>
+        {cats.map((c) => (
+          <button
+            key={c}
+            type="button"
+            onClick={() => setCat(c)}
+            className={cn(
+              "h-7 rounded-full px-2 text-[10px] uppercase tracking-wider",
+              cat === c ? "bg-primary text-primary-foreground" : "bg-secondary text-muted-foreground",
+            )}
+          >
+            {c}
+          </button>
+        ))}
+      </div>
       <input
         ref={fileRef}
         type="file"
@@ -76,28 +119,46 @@ export function Catalog({ layout }: { layout: "side" | "row" }) {
       {customSrc && mockupId === "custom" ? (
         <p className={cn("truncate text-[11px] text-muted-foreground", layout === "row" && "hidden")}>{customName}</p>
       ) : null}
-      {MOCKUPS.map((m) => (
-        <button
-          key={m.id}
-          type="button"
-          onClick={() => selectMockup(m.id)}
-          className={cn(
-            "group relative overflow-hidden rounded-lg text-left shadow-[var(--shadow-border)]",
-            itemClass,
-            mockupId === m.id && "ring-1 ring-primary",
-          )}
-        >
-          <img
-            src={m.src}
-            alt={m.name}
-            className="h-28 w-full bg-[#efe8dc] object-contain outline outline-1 -outline-offset-1 outline-foreground/10"
-          />
-          <span className="absolute inset-x-0 bottom-0 bg-background/80 px-2 py-1 text-[11px] leading-tight text-foreground">
-            <span className="block font-medium tabular-nums text-muted-foreground">{m.sku}</span>
-            {m.name}
-          </span>
-        </button>
-      ))}
+      {eligible.map((r) => {
+        const m = MOCKUPS.find((x) => x.sku === r.sku);
+        if (!m) return null;
+        return (
+          <button
+            key={r.sku}
+            type="button"
+            onClick={() => selectMockup(m.id)}
+            className={cn(
+              "group relative overflow-hidden rounded-lg text-left shadow-[var(--shadow-border)]",
+              itemClass,
+              mockupId === m.id && "ring-1 ring-primary",
+            )}
+          >
+            <img
+              src={pickSrc(r.images, m.src)}
+              alt={r.name}
+              className="h-28 w-full bg-[#efe8dc] object-contain outline outline-1 -outline-offset-1 outline-foreground/10"
+            />
+            <span className="absolute inset-x-0 bottom-0 bg-background/80 px-2 py-1 text-[11px] leading-tight text-foreground">
+              <span className="block font-medium tabular-nums text-muted-foreground">{r.sku}</span>
+              {r.name}
+            </span>
+          </button>
+        );
+      })}
+      {layout === "side" && pending.length ? (
+        <div className="space-y-1 pt-2">
+          <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Awaiting catalogue photo</p>
+          {pending.map((r) => (
+            <p key={r.sku} className="truncate text-[11px] tabular-nums text-muted-foreground">
+              {r.sku}  {r.name}
+            </p>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
+}
+
+function pickSrc(images: string[], fallback: string) {
+  return images[0] || fallback;
 }

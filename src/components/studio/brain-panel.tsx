@@ -5,7 +5,9 @@ import { Slider } from "@/components/ui/slider";
 import { useStudio } from "@/lib/store";
 import { formatDeg, poseFromQuad } from "@/lib/geometry";
 import { METHODS } from "@/lib/methods";
-import { inspectPlacement } from "@/lib/qc";
+import { inspectPlacement, inspectSubstrate } from "@/lib/qc";
+import { formatMarkSize, markSizeMm } from "@/lib/mark-size";
+import { OrderBoard } from "@/components/studio/order-board";
 import { SPOT_SWATCHES, type Treatment } from "@/lib/treat";
 import { cn } from "@/lib/utils";
 
@@ -67,15 +69,26 @@ export function BrainPanel({ onScan }: { onScan: () => void }) {
   const allowed = "methods" in mockup ? mockup.methods : [];
   const maxScale = "maxScale" in mockup ? mockup.maxScale : 0.9;
   const sku = "sku" in mockup ? mockup.sku : "CUSTOM";
-  const flags = inspectPlacement({
-    scale,
-    maxScale,
-    quad,
-    method,
-    allowed,
-    productTone: "tone" in mockup ? mockup.tone : "mid",
-    invert,
-  });
+  const printWmm = "printWmm" in mockup ? mockup.printWmm : 80;
+  const printHmm = "printHmm" in mockup ? mockup.printHmm : 80;
+  const mm = markSizeMm({ printWmm, printHmm, scale, logoAspect: 1.6 });
+  const markLine = formatMarkSize(mm.w, mm.h, surfaceLabel);
+  const flags = [
+    ...inspectPlacement({
+      scale,
+      maxScale,
+      quad,
+      method,
+      allowed,
+      productTone: "tone" in mockup ? mockup.tone : "mid",
+      invert,
+    }),
+    ...inspectSubstrate({
+      method,
+      material,
+      category: "category" in mockup ? String(mockup.category) : "",
+    }),
+  ];
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-6 overflow-y-auto p-4">
@@ -88,6 +101,7 @@ export function BrainPanel({ onScan }: { onScan: () => void }) {
             Print {mockup.printWmm} × {mockup.printHmm} mm
           </p>
         ) : null}
+        <p className="text-xs tabular-nums text-foreground">{markLine}</p>
       </header>
 
       <div className="space-y-2">
@@ -113,7 +127,7 @@ export function BrainPanel({ onScan }: { onScan: () => void }) {
       <div className="space-y-2">
         <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Mark treatment</p>
         <div className="grid grid-cols-2 gap-2">
-          {(["auto", "knockout", "full", "one_color"] as Treatment[]).map((t) => (
+          {(["auto", "knockout", "full", "one_color", "tone"] as Treatment[]).map((t) => (
             <button
               key={t}
               type="button"
@@ -123,7 +137,15 @@ export function BrainPanel({ onScan }: { onScan: () => void }) {
                 treatment === t ? "bg-primary text-primary-foreground" : "bg-secondary text-foreground",
               )}
             >
-              {t === "auto" ? "Auto" : t === "knockout" ? "Knockout" : t === "full" ? "Full colour" : "1-colour"}
+              {t === "auto"
+                ? "Auto"
+                : t === "knockout"
+                  ? "Knockout"
+                  : t === "full"
+                    ? "Full colour"
+                    : t === "tone"
+                      ? "Tone"
+                      : "1-colour"}
             </button>
           ))}
         </div>
@@ -252,6 +274,7 @@ export function BrainPanel({ onScan }: { onScan: () => void }) {
           <RotateCcw />
           Reset placement
         </Button>
+        <OrderBoard />
       </div>
     </div>
   );
