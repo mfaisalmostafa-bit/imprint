@@ -68,6 +68,7 @@ export function BrainPanel({ onScan }: { onScan: () => void }) {
 
   const allowed = "methods" in mockup ? mockup.methods : [];
   const maxScale = "maxScale" in mockup ? mockup.maxScale : 0.9;
+  const scaleCap = useStudio((s) => s.scaleCap);
   const sku = "sku" in mockup ? mockup.sku : "CUSTOM";
   const printWmm = "printWmm" in mockup ? mockup.printWmm : 80;
   const printHmm = "printHmm" in mockup ? mockup.printHmm : 80;
@@ -230,7 +231,7 @@ export function BrainPanel({ onScan }: { onScan: () => void }) {
 
       <div className="space-y-5">
         <Row label="Scale" value={`${Math.round(scale * 100)}%`}>
-          <Slider min={0.18} max={maxScale} step={0.01} value={[scale]} onValueChange={(v) => setScale(v[0] ?? scale)} />
+          <Slider min={0.18} max={Math.min(maxScale, scaleCap)} step={0.01} value={[scale]} onValueChange={(v) => setScale(v[0] ?? scale)} />
         </Row>
         <Row label="Depth" value={`${Math.round(opacity * 100)}%`}>
           <Slider min={0.2} max={1} step={0.01} value={[opacity]} onValueChange={(v) => setOpacity(v[0] ?? opacity)} />

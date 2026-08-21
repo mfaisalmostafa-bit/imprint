@@ -272,3 +272,12 @@ test("optics findings use catalogue photos and do not patch Python", () => {
 test("no retrying copy unless something retries", () => {
   assert.doesNotMatch(jobsApp + reviewSrc + searchUi, /retrying/i);
 });
+
+test("auto mark size uses a high-side body guard", () => {
+  const fit = readFileSync("src/lib/fit-mark.ts", "utf8");
+  const store = readFileSync("src/lib/store.ts", "utf8");
+  assert.match(fit, /BODY_HIGH = 0.95/);
+  assert.match(fit, /DEAD_IMAGE_CAP/);
+  assert.match(store, /fitMarkScale/);
+  assert.match(store, /bodyTrusted/);
+});

@@ -1,7 +1,9 @@
 import { create } from "zustand";
 import {
+  clamp,
   cloneQuad,
   defaultCenterQuad,
+  quadBBox,
   type Quad,
 } from "./geometry";
 import {
@@ -22,6 +24,7 @@ import type { MethodId } from "./methods";
 import type { Treatment } from "./treat";
 import type { JobKind } from "./cc";
 import { recallPlacement, rememberPlacement } from "./placement-memory";
+import { fitMarkScale, zoneForFit } from "./fit-mark";
 
 export type LogoAsset = {
   id: string;
@@ -43,6 +46,7 @@ type Snapshot = {
   customQuad: Quad;
   quad: Quad;
   scale: number;
+  scaleCap: number;
   offsetX: number;
   offsetY: number;
   opacity: number;
@@ -69,6 +73,7 @@ type StudioState = {
   customQuad: Quad;
   quad: Quad;
   scale: number;
+  scaleCap: number;
   offsetX: number;
   offsetY: number;
   opacity: number;
@@ -180,6 +185,7 @@ function takeSnapshot(s: StudioState): Snapshot {
     customQuad: cloneQuad(s.customQuad),
     quad: cloneQuad(s.quad),
     scale: s.scale,
+    scaleCap: s.scaleCap,
     offsetX: s.offsetX,
     offsetY: s.offsetY,
     opacity: s.opacity,
@@ -206,6 +212,14 @@ function apparelOffset(id: string): number {
   return 0;
 }
 
+function bodyWidthOf(result: ScanResult | DetectResult, quad: Quad) {
+  if ("bodyWidth" in result && typeof result.bodyWidth === "number") return result.bodyWidth;
+  if ("topWidth" in result && "botWidth" in result) {
+    return Math.max(result.topWidth, result.botWidth);
+  }
+  return quadBBox(quad).w;
+}
+
 export const useStudio = create<StudioState>((set, get) => ({
   logo: {
     id: SAMPLE_LOGOS[0].id,
@@ -220,6 +234,7 @@ export const useStudio = create<StudioState>((set, get) => ({
   customQuad: defaultCenterQuad(),
   quad: cloneQuad(first.quad),
   scale: first.scale,
+  scaleCap: first.maxScale,
   offsetX: 0,
   offsetY: apparelOffset(first.id),
   opacity: 0.92,
@@ -307,6 +322,7 @@ export const useStudio = create<StudioState>((set, get) => ({
       offsetX: mem?.offsetX ?? 0,
       offsetY: mem?.offsetY ?? apparelOffset(m.id),
       scale: mem?.scale ?? m.scale,
+      scaleCap: m.maxScale,
       method: m.defaultMethod,
       mode: "studio",
     });
@@ -342,6 +358,7 @@ export const useStudio = create<StudioState>((set, get) => ({
       brainNote: "Scan the surface — local contrast lock, no API.",
       scanError: null,
       scale: 0.7,
+      scaleCap: 0.6,
       offsetX: 0,
       offsetY: 0,
       mode: "studio",
@@ -353,7 +370,10 @@ export const useStudio = create<StudioState>((set, get) => ({
       logo: { id: "wordmark", name: text || "Wordmark", src: null, kind: "wordmark" },
     }),
   setQuad: (quad) => set({ quad }),
-  setScale: (n) => set({ scale: n }),
+  setScale: (n) => {
+    const cap = get().scaleCap;
+    set({ scale: clamp(n, 0.15, cap) });
+  },
   setOffset: (x, y) => set({ offsetX: x, offsetY: y }),
   setOpacity: (n) => set({ opacity: n }),
   setBlend: (b) => set({ blend: b }),
@@ -369,6 +389,7 @@ export const useStudio = create<StudioState>((set, get) => ({
       set({
         quad: defaultCenterQuad(),
         scale: 0.7,
+        scaleCap: 0.6,
         offsetX: 0,
         offsetY: 0,
       });
@@ -382,27 +403,46 @@ export const useStudio = create<StudioState>((set, get) => ({
       cylinderArc: m.cylinderArc,
       invert: m.invert,
       scale: m.scale,
+      scaleCap: m.maxScale,
       method: m.defaultMethod,
       offsetX: 0,
       offsetY: apparelOffset(m.id),
     });
   },
   applyScan: (result) =>
-    set((s) => ({
-      quad: result.quad,
-      customQuad: s.mockupId === "custom" ? result.quad : s.customQuad,
-      wrap: result.wrap,
-      cylinderArc: "cylinderArc" in result && result.cylinderArc ? result.cylinderArc : s.cylinderArc,
-      blend: result.suggestedBlend,
-      invert: result.surfaceTone === "dark" || ("invert" in result && result.invert),
-      lighting: result.surfaceTone === "dark" ? 0.32 : 0.55,
-      surfaceLabel: "surface" in result ? result.surface : s.surfaceLabel,
-      material: "material" in result ? result.material : s.material,
-      confidence: result.confidence,
-      brainNote: result.notes,
-      scanning: false,
-      scanError: null,
-    })),
+    set((s) => {
+      const mock = s.mockup();
+      const maxScale = "maxScale" in mock ? mock.maxScale : 0.9;
+      const preferred = "scale" in mock && s.mockupId !== "custom" ? mock.scale : s.scale;
+      const detected = result.quad;
+      const trusted = "bodyTrusted" in result ? result.bodyTrusted : quadBBox(detected).w < 0.95;
+      const keepCatalog = !trusted && s.mockupId !== "custom";
+      const quad = keepCatalog ? s.quad : zoneForFit(detected, trusted);
+      const bodyWidth = bodyWidthOf(result, quad);
+      const fit = fitMarkScale({
+        bodyWidth,
+        zoneWidth: quadBBox(quad).w,
+        maxScale,
+        preferred,
+      });
+      return {
+        quad,
+        customQuad: s.mockupId === "custom" ? quad : s.customQuad,
+        wrap: result.wrap,
+        cylinderArc: "cylinderArc" in result && result.cylinderArc ? result.cylinderArc : s.cylinderArc,
+        blend: result.suggestedBlend,
+        invert: result.surfaceTone === "dark" || ("invert" in result && result.invert),
+        lighting: result.surfaceTone === "dark" ? 0.32 : 0.55,
+        surfaceLabel: "surface" in result ? result.surface : s.surfaceLabel,
+        material: "material" in result ? result.material : s.material,
+        confidence: result.confidence,
+        brainNote: fit.trusted ? result.notes : fit.note,
+        scanning: false,
+        scanError: null,
+        scale: fit.scale,
+        scaleCap: fit.cap,
+      };
+    }),
   setScanning: (v) => set({ scanning: v, scanError: v ? null : get().scanError }),
   setGenerating: (v) => set({ generating: v }),
   setScanError: (e) => set({ scanError: e, scanning: false, generating: false }),

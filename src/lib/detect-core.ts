@@ -5,6 +5,7 @@ import {
   type Quad,
 } from "./geometry";
 import type { BlendMode, SurfaceTone, WrapMode } from "./mockups";
+import { bodyTrusted } from "./fit-mark";
 
 export type DetectResult = {
   accepted: boolean;
@@ -21,6 +22,8 @@ export type DetectResult = {
   contrast: number;
   topWidth: number;
   botWidth: number;
+  bodyWidth: number;
+  bodyTrusted: boolean;
   notes: string;
 };
 
@@ -41,6 +44,56 @@ function median(values: number[]): number {
 
 function lum(r: number, g: number, b: number) {
   return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+function gradientBBox(L: Float32Array, w: number, h: number) {
+  const M = new Float32Array(w * h);
+  const samples: number[] = [];
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      const i = y * w + x;
+      const gx = L[i + 1]! - L[i - 1]!;
+      const gy = L[i + w]! - L[i - w]!;
+      const m = Math.abs(gx) + Math.abs(gy);
+      M[i] = m;
+      if ((i & 7) === 0) samples.push(m);
+    }
+  }
+  samples.sort((a, b) => a - b);
+  const thresh = Math.max(8, samples[Math.floor(samples.length * 0.88)] ?? 12);
+  const border = Math.max(1, Math.round(Math.min(w, h) * 0.02));
+  let minX = w;
+  let minY = h;
+  let maxX = 0;
+  let maxY = 0;
+  let hits = 0;
+  for (let y = border; y < h - border; y++) {
+    for (let x = border; x < w - border; x++) {
+      if (M[y * w + x]! < thresh) continue;
+      hits++;
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+    }
+  }
+  if (hits < 12 || maxX <= minX || maxY <= minY) return null;
+  return {
+    x0: minX,
+    y0: minY,
+    x1: maxX,
+    y1: maxY,
+    fw: (maxX - minX) / w,
+    fh: (maxY - minY) / h,
+  };
+}
+
+function clipMask(mask: Uint8Array, w: number, h: number, box: { x0: number; y0: number; x1: number; y1: number }) {
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (x < box.x0 || x > box.x1 || y < box.y0 || y > box.y1) mask[y * w + x] = 0;
+    }
+  }
 }
 
 function dilate(src: Uint8Array, w: number, h: number, rad: number) {
@@ -147,6 +200,8 @@ function refused(contrast: number, extra: string): DetectResult {
     contrast,
     topWidth: 0,
     botWidth: 0,
+    bodyWidth: 0,
+    bodyTrusted: false,
     notes: extra,
   };
 }
@@ -233,9 +288,26 @@ export function detectFromRgb(buf: RgbBuffers, prior?: Quad): DetectResult {
   const rad = Math.max(1, Math.round(Math.min(w, h) * 0.012));
   raw = erode(dilate(raw, w, h, rad), w, h, rad);
   const { mask, count } = largestComponent(raw, w, h);
-  const coverage = count / n;
+  let coverage = count / n;
   if (coverage < 0.04) {
     return refused(p90, "No coherent product mass. Drag the corners onto the print face.");
+  }
+
+  const L = new Float32Array(n);
+  for (let i = 0; i < n; i++) L[i] = lum(r[i]!, g[i]!, b[i]!);
+  const gb = gradientBBox(L, w, h);
+  if (
+    gb &&
+    (coverage > 0.82 || gb.fw * gb.fh < coverage * 0.75) &&
+    gb.fw < 0.9 &&
+    gb.fh < 0.9 &&
+    gb.fw > 0.1 &&
+    gb.fh > 0.08
+  ) {
+    clipMask(mask, w, h, gb);
+    let kept = 0;
+    for (let i = 0; i < n; i++) if (mask[i]) kept++;
+    if (kept / n >= 0.04) coverage = kept / n;
   }
 
   const rowLeft = new Int16Array(h).fill(-1);
@@ -250,6 +322,8 @@ export function detectFromRgb(buf: RgbBuffers, prior?: Quad): DetectResult {
     if (rowLeft[y] >= 0) rowW.push(rowRight[y]! - rowLeft[y]!);
   }
   const medW = median(rowW);
+  const bodyWidth = medW / w;
+  const trustedBody = bodyTrusted(bodyWidth) && coverage < 0.88;
   // Drop stray whiskers, keep a real taper (top can be ~40% of bottom).
   const minW = medW * 0.28;
   for (let y = 0; y < h; y++) {
@@ -284,7 +358,7 @@ export function detectFromRgb(buf: RgbBuffers, prior?: Quad): DetectResult {
   const brx = edge(y1 - band, y1, "right") / w;
   const topWidth = Math.max(0, trx - tlx);
   const botWidth = Math.max(0, brx - blx);
-  const inset = 0.07;
+  const inset = trustedBody ? 0.07 : 0.16;
   const top = y0 / h;
   const bot = (y1 + 1) / h;
   const quad = clampQuad([
@@ -351,29 +425,33 @@ export function detectFromRgb(buf: RgbBuffers, prior?: Quad): DetectResult {
 
   let outQuad = quad;
   if (prior && isConvexQuad(prior)) {
-    let sx = 0;
-    let sy = 0;
-    let sw = 0;
-    for (let y = 0; y < h; y++) {
-      for (let x = 0; x < w; x++) {
-        if (!mask[y * w + x]) continue;
-        sx += x;
-        sy += y;
-        sw++;
+    if (!trustedBody) {
+      outQuad = prior;
+    } else {
+      let sx = 0;
+      let sy = 0;
+      let sw = 0;
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          if (!mask[y * w + x]) continue;
+          sx += x;
+          sy += y;
+          sw++;
+        }
       }
-    }
-    if (sw > 0) {
-      const cx = sx / sw / w;
-      const cy = sy / sw / h;
-      const ocx = (prior[0].x + prior[1].x + prior[2].x + prior[3].x) / 4;
-      const ocy = (prior[0].y + prior[1].y + prior[2].y + prior[3].y) / 4;
-      const dx = cx - ocx;
-      const dy = cy - ocy;
-      const moved = prior.map((p) => ({
-        x: Math.min(0.97, Math.max(0.03, p.x + dx)),
-        y: Math.min(0.97, Math.max(0.03, p.y + dy)),
-      })) as Quad;
-      if (isConvexQuad(moved) && quadArea(moved) >= 0.01) outQuad = clampQuad(moved);
+      if (sw > 0) {
+        const cx = sx / sw / w;
+        const cy = sy / sw / h;
+        const ocx = (prior[0].x + prior[1].x + prior[2].x + prior[3].x) / 4;
+        const ocy = (prior[0].y + prior[1].y + prior[2].y + prior[3].y) / 4;
+        const dx = cx - ocx;
+        const dy = cy - ocy;
+        const moved = prior.map((p) => ({
+          x: Math.min(0.97, Math.max(0.03, p.x + dx)),
+          y: Math.min(0.97, Math.max(0.03, p.y + dy)),
+        })) as Quad;
+        if (isConvexQuad(moved) && quadArea(moved) >= 0.01) outQuad = clampQuad(moved);
+      }
     }
   }
 
@@ -387,13 +465,16 @@ export function detectFromRgb(buf: RgbBuffers, prior?: Quad): DetectResult {
     surfaceTone,
     suggestedBlend,
     invert,
-    confidence,
+    confidence: trustedBody ? confidence : Math.min(confidence, 0.42),
     coverage,
     contrast,
     topWidth,
     botWidth,
-    notes:
-      wrap === "cylinder"
+    bodyWidth,
+    bodyTrusted: trustedBody,
+    notes: !trustedBody
+      ? "Body filled the frame — print zone kept, mark sized from the zone."
+      : wrap === "cylinder"
         ? "Local lock — curved wall from side falloff. Existing marks ignored."
         : "Local lock — silhouette vs backdrop. Existing marks ignored.",
   };

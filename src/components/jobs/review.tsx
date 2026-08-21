@@ -53,6 +53,7 @@ export function ReviewScreen() {
   const compare = useStudio((s) => s.compare);
   const quad = useStudio((s) => s.quad);
   const maxScale = "maxScale" in mockup ? mockup.maxScale : 0.96;
+  const scaleCap = useStudio((s) => s.scaleCap);
   const [note, setNote] = useState("Click the zoom window to pin a corner. Minimise it when you need the photo.");
   const [origin, setOrigin] = useState<"detected" | "override">("detected");
   const [base, setBase] = useState("");
@@ -152,7 +153,13 @@ export function ReviewScreen() {
     const s = useStudio.getState();
     setOrigin("detected");
     setBase(fingerprint(quadToEngine(s.quad), s.wrap, s.cylinderArc));
-    setNote(d.accepted ? "Reset to detected plane." : d.notes);
+    setNote(
+      d.accepted
+        ? d.bodyTrusted === false
+          ? d.notes
+          : "Reset to detected plane."
+        : d.notes,
+    );
     stageRef.current?.zoomFit();
   };
 
@@ -172,7 +179,13 @@ export function ReviewScreen() {
     const s = useStudio.getState();
     setOrigin("detected");
     setBase(fingerprint(quadToEngine(s.quad), s.wrap, s.cylinderArc));
-    setNote(d.accepted ? "Detected the branding face. Drag corners to correct." : d.notes);
+    setNote(
+      d.accepted
+        ? d.bodyTrusted === false
+          ? d.notes
+          : "Detected the branding face. Drag corners to correct."
+        : d.notes,
+    );
     stageRef.current?.zoomZone();
   };
 
@@ -237,7 +250,7 @@ export function ReviewScreen() {
             onLoupeZoom={setLoupeZoom}
             quad={quad}
             scale={scale}
-            maxScale={maxScale}
+            maxScale={Math.min(maxScale, scaleCap)}
             onScale={setScale}
             wrap={wrap}
             onWrap={setWrap}

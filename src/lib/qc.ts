@@ -3,6 +3,7 @@ import { METHODS } from "./methods";
 import type { Quad } from "./geometry";
 import { poseFromQuad, quadArea } from "./geometry";
 import { logoDpi } from "./mark-size";
+import { markBodyRatio } from "./fit-mark";
 
 export type QcFlag = {
   level: "warn" | "block";
@@ -123,6 +124,8 @@ export function inspectPlacement(opts: {
   allowed: MethodId[];
   productTone: "light" | "mid" | "dark";
   invert: boolean;
+  bodyWidth?: number;
+  zoneWidth?: number;
 }): QcFlag[] {
   const flags: QcFlag[] = [];
   if (!opts.allowed.includes(opts.method)) {
@@ -138,6 +141,21 @@ export function inspectPlacement(opts: {
       code: "oversize",
       text: `Mark exceeds the print-safe scale (${Math.round(opts.maxScale * 100)}%). Pull it back from seams.`,
     });
+  }
+  if (
+    opts.bodyWidth !== undefined &&
+    opts.zoneWidth !== undefined &&
+    opts.bodyWidth < 0.95 &&
+    opts.bodyWidth >= 0.08
+  ) {
+    const ratio = markBodyRatio(opts.scale, opts.zoneWidth, opts.bodyWidth);
+    if (ratio > 1) {
+      flags.push({
+        level: "block",
+        code: "oversize",
+        text: `Mark is ${ratio.toFixed(2)}× the product body. Size from the print zone.`,
+      });
+    }
   }
   if (opts.scale > opts.maxScale * 0.92) {
     flags.push({

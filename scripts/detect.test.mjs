@@ -85,3 +85,33 @@ test("baked-in logo hole does not punch the plane", () => {
   assert.equal(d.accepted, true);
   assert.ok(d.quad[2].y - d.quad[0].y > 0.35);
 });
+
+test("compact dark body on a dark set is not the whole frame", () => {
+  const shot = buffers(W, H, (x, y) => {
+    const xn = x / (W - 1);
+    const yn = y / (H - 1);
+    if (xn > 0.28 && xn < 0.72 && yn > 0.22 && yn < 0.78) return [48, 50, 54];
+    return [8, 8, 10];
+  });
+  const d = detectFromRgb(shot);
+  if (d.accepted) {
+    const zw = d.quad[1].x - d.quad[0].x;
+    assert.ok(d.bodyWidth < 0.95, `bodyWidth=${d.bodyWidth}`);
+    assert.ok(zw < 0.9, `zone w=${zw}`);
+    assert.equal(d.bodyTrusted, true);
+  }
+});
+
+test("body filling the frame is untrusted", () => {
+  const filled = buffers(W, H, (x, y) => {
+    const xn = x / (W - 1);
+    const yn = y / (H - 1);
+    const edge = xn < 0.02 || xn > 0.98 || yn < 0.02 || yn > 0.98;
+    return edge ? [4, 4, 5] : [28, 30, 32];
+  });
+  const d = detectFromRgb(filled);
+  if (d.accepted) {
+    assert.equal(d.bodyTrusted, false);
+    assert.ok(d.bodyWidth >= 0.88 || d.coverage >= 0.82);
+  }
+});
