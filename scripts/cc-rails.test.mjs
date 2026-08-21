@@ -80,6 +80,11 @@ test("writes require a confirm phrase and stay locked", async () => {
   assert.equal(blocked.status, 423);
   const bad = g.requireWrite("manager.create", "please", {});
   assert.equal(bad.ok, false);
+  const noPhrase = g.requireWrite("placement.save", "", { sku: "TPX-PEN-01" });
+  assert.equal(noPhrase.ok, false);
+  assert.equal(noPhrase.required, "SAVE PLACEMENT OVERRIDE");
+  const placed = g.requireWrite("placement.save", "SAVE PLACEMENT OVERRIDE", { sku: "TPX-PEN-01" });
+  assert.equal(placed.ok, true);
 });
 
 test("brand is navy #04263F and orange #D1812E", () => {

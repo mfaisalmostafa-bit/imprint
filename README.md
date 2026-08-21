@@ -1,8 +1,10 @@
-# TePee-X Command Center
+# TePee-X IMPRINT
 
-The phone the company actually runs on. Twenty tabs, live-shaped data, and a photo checker that will not invent a verdict.
+Three jobs. The Command Center stays at `/cc` — this does not replace it.
 
-IMPRINT (branded mockups) lives under **Graphic**.
+1. **Review** — phone-first corner-drag against the engine quad (TL, TR, BR, BL in 0–1). Save writes a shared per-SKU override. Reset to detected.
+2. **Optics** — findings against their renderer, on real catalogue photos. We do not patch their Python.
+3. **Search** — confidence UI over Photo Search. A 40% hit is not a lock. Blur / dark / too-far refuse before ranking. Several photos of one item are one answer.
 
 ## Rails
 
@@ -10,11 +12,7 @@ IMPRINT (branded mockups) lives under **Graphic**.
 - Five methods only. UV Printing ≠ UV DTF.
 - Price 0 is B2B config, never an error.
 - Brand: navy `#04263F`, orange `#D1812E`, Montserrat.
-- No live write without the confirm phrase.
-
-## Photo checker
-
-Ranks: Stop, Act, then silence. If it cannot judge an image, it says so.
+- No live write without the confirm phrase `SAVE PLACEMENT OVERRIDE`.
 
 ## Run
 

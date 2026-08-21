@@ -12,7 +12,9 @@ export function CommandCenter() {
   return (
     <div className="flex h-dvh min-h-0 flex-col bg-background text-foreground">
       <header className="flex h-12 shrink-0 items-center justify-between border-b border-border px-4">
-        <p className="text-xs font-semibold tracking-[0.22em] text-foreground">TEPEE-X</p>
+        <a href="/" className="text-xs font-semibold tracking-[0.22em] text-foreground">
+          TEPEE-X
+        </a>
         <p className="text-xs text-muted-foreground">{label}</p>
       </header>
 

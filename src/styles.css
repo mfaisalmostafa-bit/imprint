@@ -28,6 +28,7 @@
   --color-ok: #7d9a78;
   --color-navy: #04263f;
   --color-orange: #d1812e;
+  --color-paper: #efe8dc;
 
   --radius-xs: 4px;
   --radius-sm: 8px;
@@ -36,6 +37,7 @@
   --radius-xl: 24px;
 
   --shadow-border: 0 0 0 1px rgb(255 255 255 / 0.08);
+  --shadow-border-hover: 0 0 0 1px rgb(255 255 255 / 0.13);
 }
 
 @layer base {

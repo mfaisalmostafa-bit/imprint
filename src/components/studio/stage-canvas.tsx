@@ -328,7 +328,7 @@ export const StageCanvas = forwardRef<StageHandle>(function StageCanvas(_, ref) 
               key={i}
               type="button"
               aria-label={`Move ${labels[i]} corner`}
-              className="absolute z-10 size-7 -translate-x-1/2 -translate-y-1/2 touch-none rounded-full bg-primary text-[9px] font-semibold tracking-wide text-primary-foreground shadow-[var(--shadow-border)] after:absolute after:left-1/2 after:top-1/2 after:size-11 after:-translate-x-1/2 after:-translate-y-1/2"
+              className="absolute z-10 size-11 -translate-x-1/2 -translate-y-1/2 touch-none rounded-full bg-primary text-[10px] font-semibold tracking-wide text-primary-foreground shadow-[var(--shadow-border)] after:absolute after:left-1/2 after:top-1/2 after:size-12 after:-translate-x-1/2 after:-translate-y-1/2"
               style={{ left: `${p.x * 100}%`, top: `${p.y * 100}%` }}
               onPointerDown={(e) => {
                 e.preventDefault();

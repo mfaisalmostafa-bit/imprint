@@ -8,6 +8,7 @@ export const CONFIRM_PHRASES: Record<string, string> = {
   "zoho.sheet.update": "UPDATE SHEET ROWS",
   "zoho.workdrive.folder": "CREATE WORKDRIVE FOLDER",
   "zoho.mail.send": "SEND EMAIL",
+  "placement.save": "SAVE PLACEMENT OVERRIDE",
 };
 
 export const OP_DESC: Record<string, string> = {
@@ -17,6 +18,7 @@ export const OP_DESC: Record<string, string> = {
   "zoho.sheet.add": "Append rows to a worksheet.",
   "zoho.workdrive.folder": "Create a WorkDrive folder.",
   "zoho.mail.send": "Send as automations@tepee-x.com.",
+  "placement.save": "Write a per-SKU print-zone correction.",
 };
 
 export type GuardResult =
@@ -24,11 +26,12 @@ export type GuardResult =
   | { ok: false; status: 400 | 423; error: string; required?: string; plan?: Record<string, unknown> };
 
 const writesEnabled = false;
+const LOCAL_OPS = new Set(["placement.save"]);
 
 export function requireWrite(op: string, confirm: string, body: Record<string, unknown> = {}): GuardResult {
   const phrase = CONFIRM_PHRASES[op];
   if (!phrase) return { ok: false, status: 400, error: `unknown write op '${op}'` };
-  if (!writesEnabled) {
+  if (!LOCAL_OPS.has(op) && !writesEnabled) {
     return {
       ok: false,
       status: 423,
