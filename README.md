@@ -1,20 +1,20 @@
-# TPX Mockup
+# TePee-X Command Center
 
-TePee-X Command Center proofs. A salesperson picks a client, a SKU, and a logo — the generator locks the print zone and renders the **quoted decoration method**, not a Photoshop blend.
+The phone the company actually runs on. Twenty tabs, live-shaped data, and a photo checker that will not invent a verdict.
+
+IMPRINT (branded mockups) lives under **Graphic**.
 
 ## Rails
 
-- Methods: Laser Engraving, UV Printing, UV DTF, Sublimation, Embroidery. Never pad / screen / emboss / deboss / foil.
-- Hard goods, bags, boxes → UV Printing. Textiles / non-embroidery apparel → UV DTF.
-- Brand from `brand.ts` only: navy `#04263F`, orange `#D1812E`, Montserrat.
-- SKUs are `TPX-XXX-NN`. No supplier names.
-- Proofs use catalogue photos only. Imagine is for concepts, never an invoice.
+- No supplier names on a client screen.
+- Five methods only. UV Printing ≠ UV DTF.
+- Price 0 is B2B config, never an error.
+- Brand: navy `#04263F`, orange `#D1812E`, Montserrat.
+- No live write without the confirm phrase.
 
-## Catalogue + order
+## Photo checker
 
-Searchable read-only catalogue (JSON today, live API later). An account manager's order of several SKUs exports as **one branded PDF**: before/after, method from the order line, mark size in millimetres, QC warnings.
-
-Placement corrections persist per SKU.
+Ranks: Stop, Act, then silence. If it cannot judge an image, it says so.
 
 ## Run
 

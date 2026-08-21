@@ -70,6 +70,10 @@
   p {
     text-wrap: pretty;
   }
+
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

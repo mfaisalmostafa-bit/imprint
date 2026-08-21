@@ -79,3 +79,30 @@ export const METHOD_ORDER: MethodId[] = [
   "sublimation",
   "embroidery",
 ];
+
+export function methodsForCategory(category: string): MethodId[] {
+  const c = category.toLowerCase();
+  if (c === "apparel") return ["embroidery", "uv_dtf"];
+  if (c === "drinkware") return ["sublimation", "laser_engrave", "uv_print"];
+  if (c === "writing" || c === "tech" || c === "awards") return ["laser_engrave", "uv_print"];
+  if (c === "stationery" || c === "packaging" || c === "display") return ["uv_print"];
+  return ["uv_print"];
+}
+
+export function defaultMethodFor(category: string): MethodId {
+  return methodsForCategory(category)[0] ?? "uv_print";
+}
+
+export function describeMethodPairing(category: string, method: MethodId): string | null {
+  const allowed = methodsForCategory(category);
+  if (!allowed.includes(method)) {
+    if (method === "uv_print" && allowed.includes("uv_dtf")) {
+      return "Textiles are UV DTF. Never quote UV Printing on apparel.";
+    }
+    if (method === "uv_dtf" && allowed.includes("uv_print")) {
+      return "Hard goods, bags and boxes are UV Printing, not UV DTF.";
+    }
+    return `${method} is not quoted on ${category}.`;
+  }
+  return null;
+}
