@@ -278,11 +278,11 @@ export function StudioApp() {
       onDragOver={(e) => e.preventDefault()}
       onDrop={onDrop}
     >
-      <header className="relative flex flex-wrap items-center gap-2 border-b border-border bg-card px-3 py-2 sm:px-4">
+      <header className="relative flex flex-wrap items-center gap-2 border-b border-border bg-navy px-3 py-2.5 sm:px-5">
         <span className="pointer-events-none absolute inset-x-0 bottom-0 h-0.5 bg-orange" aria-hidden />
-        <div className="min-w-0">
-          <p className="font-sans text-lg font-semibold tracking-tight text-foreground">TPX</p>
-          <p className="hidden text-xs text-muted-foreground sm:block">TePee-X  ·  Command Center</p>
+        <div className="min-w-0 pr-2">
+          <p className="font-sans text-[15px] font-semibold tracking-[0.18em] text-foreground">TEPEE-X</p>
+          <p className="hidden text-[11px] tracking-wide text-muted-foreground sm:block">Command Center proof</p>
         </div>
         <select
           value={clientId}
@@ -365,7 +365,7 @@ export function StudioApp() {
           </aside>
         ) : null}
 
-        <section className="studio-stage relative min-h-0 min-w-0 overflow-hidden bg-black">
+        <section className="studio-stage relative min-h-0 min-w-0 overflow-hidden">
           {mode === "edit" ? (
             <EditorStage
               source={editSource}

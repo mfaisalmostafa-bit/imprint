@@ -132,6 +132,8 @@
 }
 .studio-stage {
   grid-area: stage;
+  background:
+    radial-gradient(1200px 600px at 50% 0%, #efe8dc 0%, #d9d1c3 55%, #cfc6b6 100%);
 }
 .studio-brain {
   grid-area: brain;

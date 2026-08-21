@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { useStudio } from "@/lib/store";
-import { formatDeg, homography, poseFromQuad, UNIT_QUAD } from "@/lib/geometry";
+import { formatDeg, poseFromQuad } from "@/lib/geometry";
 import { METHODS } from "@/lib/methods";
 import { inspectPlacement } from "@/lib/qc";
 import { SPOT_SWATCHES, type Treatment } from "@/lib/treat";
@@ -63,12 +63,6 @@ export function BrainPanel({ onScan }: { onScan: () => void }) {
   const setSpotId = useStudio((s) => s.setSpotId);
 
   const pose = poseFromQuad(quad);
-  let matrix: string[] = ["—", "—", "—", "—", "—", "—", "—", "—", "—"];
-  try {
-    matrix = homography(UNIT_QUAD, quad).map((n) => n.toFixed(2));
-  } catch {
-    /* keep dashes */
-  }
 
   const allowed = "methods" in mockup ? mockup.methods : [];
   const maxScale = "maxScale" in mockup ? mockup.maxScale : 0.9;
@@ -118,8 +112,8 @@ export function BrainPanel({ onScan }: { onScan: () => void }) {
 
       <div className="space-y-2">
         <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Mark treatment</p>
-        <div className="grid grid-cols-3 gap-2">
-          {(["knockout", "full", "one_color"] as Treatment[]).map((t) => (
+        <div className="grid grid-cols-2 gap-2">
+          {(["auto", "knockout", "full", "one_color"] as Treatment[]).map((t) => (
             <button
               key={t}
               type="button"
@@ -129,7 +123,7 @@ export function BrainPanel({ onScan }: { onScan: () => void }) {
                 treatment === t ? "bg-primary text-primary-foreground" : "bg-secondary text-foreground",
               )}
             >
-              {t === "knockout" ? "Knockout" : t === "full" ? "Full colour" : "1-colour"}
+              {t === "auto" ? "Auto" : t === "knockout" ? "Knockout" : t === "full" ? "Full colour" : "1-colour"}
             </button>
           ))}
         </div>
@@ -210,13 +204,6 @@ export function BrainPanel({ onScan }: { onScan: () => void }) {
             </div>
           ))}
         </dl>
-        <div className="grid grid-cols-3 gap-x-2 gap-y-1 font-sans text-[10px] tabular-nums text-faint">
-          {matrix.map((n, i) => (
-            <span key={i} className="text-right">
-              {n}
-            </span>
-          ))}
-        </div>
       </div>
 
       <div className="space-y-5">

@@ -1,5 +1,5 @@
 import { loadImage, rasterizeLogo, renderWordmark } from "./image";
-import { knockOutPaper, toSpotColor, type Treatment } from "./treat";
+import { applyTreatment, type Treatment } from "./treat";
 import { insetLogoQuad, type Quad } from "./geometry";
 import { applySurfaceLighting, finishPrint, warpImageToQuad } from "./warp";
 import { compositeDecoration } from "./etch";
@@ -25,6 +25,7 @@ export type RenderOpts = {
   blend: BlendMode;
   method: MethodId;
   material: string;
+  substrateLum?: number;
   maxEdge?: number;
   guides?: boolean;
 };
@@ -34,13 +35,16 @@ function cap(w: number, h: number, max: number) {
   return { w: Math.round(w * s), h: Math.round(h * s) };
 }
 
-export function treatLogo(canvas: HTMLCanvasElement, treatment: Treatment, spot: [number, number, number]) {
-  if (treatment === "full") return;
+export function treatLogo(
+  canvas: HTMLCanvasElement,
+  treatment: Treatment,
+  spot: [number, number, number],
+  house?: { substrateLum: number; method: MethodId },
+) {
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
   const data = ctx.getImageData(0, 0, canvas.width, canvas.height);
-  if (treatment === "knockout") knockOutPaper(data);
-  if (treatment === "one_color") toSpotColor(data, spot);
+  applyTreatment(data, treatment, spot, house);
   ctx.putImageData(data, 0, 0);
 }
 
@@ -65,7 +69,10 @@ export async function renderBranded(opts: RenderOpts): Promise<HTMLCanvasElement
   } else {
     return canvas;
   }
-  treatLogo(logo, opts.treatment, opts.spot);
+  treatLogo(logo, opts.treatment, opts.spot, {
+    substrateLum: opts.substrateLum ?? 160,
+    method: opts.method,
+  });
 
   const surface: Quad = [
     { x: opts.quad[0].x * w, y: opts.quad[0].y * h },

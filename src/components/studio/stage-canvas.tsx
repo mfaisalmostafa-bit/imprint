@@ -54,6 +54,10 @@ export const StageCanvas = forwardRef<StageHandle>(function StageCanvas(_, ref) 
   const spotId = useStudio((s) => s.spotId);
   const compare = useStudio((s) => s.compare);
   const material = useStudio((s) => s.material);
+  const productTone = useStudio((s) => {
+    const m = s.mockup();
+    return "tone" in m ? m.tone : "mid";
+  });
 
   const [fitted, setFitted] = useState({ w: 0, h: 0 });
   const [ready, setReady] = useState(false);
@@ -116,7 +120,7 @@ export const StageCanvas = forwardRef<StageHandle>(function StageCanvas(_, ref) 
 
       if (withGuides) {
         ctx.save();
-        ctx.strokeStyle = "rgba(232, 93, 4, 0.75)";
+        ctx.strokeStyle = "rgba(209, 129, 46, 0.85)";
         ctx.lineWidth = Math.max(1.5, w / 700);
         ctx.setLineDash([w / 80, w / 90]);
         ctx.beginPath();
@@ -206,7 +210,8 @@ export const StageCanvas = forwardRef<StageHandle>(function StageCanvas(_, ref) 
       const spot = SPOT_SWATCHES.find((s) => s.id === spotId)?.rgb ?? [4, 38, 63];
       if (logo.kind === "wordmark") {
         const canvas = renderWordmark(wordmark, invert);
-        treatLogo(canvas, treatment, spot);
+        const lum = productTone === "dark" ? 70 : productTone === "light" ? 200 : 128;
+        treatLogo(canvas, treatment, spot, { substrateLum: lum, method });
         logoRef.current = canvas;
         if (!cancelled) setLogoTick((n) => n + 1);
         return;
@@ -215,7 +220,8 @@ export const StageCanvas = forwardRef<StageHandle>(function StageCanvas(_, ref) 
       const img = await loadImage(logo.src);
       if (cancelled) return;
       const canvas = rasterizeLogo(img, invert);
-      treatLogo(canvas, treatment, spot);
+      const lum = productTone === "dark" ? 70 : productTone === "light" ? 200 : 128;
+      treatLogo(canvas, treatment, spot, { substrateLum: lum, method });
       logoRef.current = canvas;
       setLogoTick((n) => n + 1);
     };
@@ -223,7 +229,7 @@ export const StageCanvas = forwardRef<StageHandle>(function StageCanvas(_, ref) 
     return () => {
       cancelled = true;
     };
-  }, [logo, wordmark, invert, treatment, spotId]);
+  }, [logo, wordmark, invert, treatment, spotId, method, productTone]);
 
   useEffect(() => {
     if (!ready) return;

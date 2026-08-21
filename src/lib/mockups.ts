@@ -11,7 +11,8 @@ export type Category =
   | "Writing"
   | "Tech"
   | "Awards"
-  | "Stationery";
+  | "Stationery"
+  | "Display";
 
 export type Mockup = {
   id: string;
@@ -441,6 +442,60 @@ export const MOCKUPS: Mockup[] = [
     printWmm: 120,
     printHmm: 80,
     substrate: "kraft board",
+  },
+  {
+    id: "totem",
+    sku: "TPX-TTM-01",
+    name: "Indoor totem",
+    category: "Display",
+    src: "/mockups/totem.jpg",
+    wrap: "plane",
+    cylinderArc: 0,
+    quad: [
+      { x: 0.29, y: 0.10 },
+      { x: 0.69, y: 0.10 },
+      { x: 0.74, y: 0.78 },
+      { x: 0.26, y: 0.78 },
+    ],
+    blend: "multiply",
+    invert: false,
+    tone: "light",
+    surface: "Print face",
+    material: "lightbox panel",
+    scale: 0.62,
+    maxScale: 0.88,
+    methods: ["uv_print"],
+    defaultMethod: "uv_print",
+    printWmm: 500,
+    printHmm: 1500,
+    substrate: "backlit PET",
+  },
+  {
+    id: "billboard",
+    sku: "TPX-BLB-01",
+    name: "Urban billboard",
+    category: "Display",
+    src: "/mockups/billboard.jpg",
+    wrap: "plane",
+    cylinderArc: 0,
+    quad: [
+      { x: 0.08, y: 0.16 },
+      { x: 0.92, y: 0.16 },
+      { x: 0.92, y: 0.62 },
+      { x: 0.08, y: 0.68 },
+    ],
+    blend: "multiply",
+    invert: false,
+    tone: "light",
+    surface: "Poster face",
+    material: "vinyl",
+    scale: 0.72,
+    maxScale: 0.92,
+    methods: ["uv_print"],
+    defaultMethod: "uv_print",
+    printWmm: 6000,
+    printHmm: 3000,
+    substrate: "outdoor vinyl",
   },
 ];
 

@@ -81,11 +81,27 @@ test("proof PDF uses house navy / orange and contact", () => {
   assert.match(files.styles, /#d1812e/i);
 });
 
+test("treat.ts swatches are the locked pair, never the old fake navy/orange", () => {
+  const treat = readFileSync("src/lib/treat.ts", "utf8");
+  assert.match(treat, /\[4, 38, 63\]/);
+  assert.match(treat, /\[209, 129, 46\]/);
+  assert.doesNotMatch(treat, /\[11,\s*31,\s*58\]/);
+  assert.doesNotMatch(treat, /\[232,\s*93,\s*4\]/);
+  assert.match(treat, /knockoutDarkNeutral/);
+  assert.match(treat, /keySolidBackground/);
+  assert.match(treat, /houseTreatPrint/);
+});
+
+test("totem SKU exists and quotes UV Printing", () => {
+  const block = files.mockups.split('id: "totem"')[1]?.slice(0, 1400) ?? "";
+  assert.match(block, /TPX-TTM-01/);
+  assert.match(block, /defaultMethod: "uv_print"/);
+});
+
+
 test("one-colour swatches use locked house navy / orange", () => {
-  assert.match(files.treat, /TPX_NAVY_RGB/);
-  assert.match(files.treat, /TPX_ORANGE_RGB/);
+  assert.match(files.treat, /\[4, 38, 63\]/);
+  assert.match(files.treat, /\[209, 129, 46\]/);
   assert.doesNotMatch(files.treat, /11,\s*31,\s*58/);
   assert.doesNotMatch(files.treat, /232,\s*93,\s*4/);
-  assert.match(files.brand, /\[4, 38, 63\]/);
-  assert.match(files.brand, /\[209, 129, 46\]/);
 });

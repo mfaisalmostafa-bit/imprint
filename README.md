@@ -11,6 +11,7 @@ A wrong method is a quoting error. Copy never uses pad print, screen print, embo
 | Metal pen, flask, USB, crystal | Laser Engraving |
 | Ceramic mug | Sublimation |
 | Bag, tote, box, notebook, power bank | UV Printing |
+| Indoor totem, billboard | UV Printing |
 | Apparel (tee, polo, cap, hoodie) | Embroidery (+ UV DTF) |
 | Textiles | UV DTF |
 

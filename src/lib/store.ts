@@ -227,7 +227,7 @@ export const useStudio = create<StudioState>((set, get) => ({
   lighting: 0.55,
   invert: first.invert,
   method: first.defaultMethod,
-  treatment: "knockout",
+  treatment: "auto",
   spotId: "navy",
   clientId: "c-nile",
   jobKind: "quote",
