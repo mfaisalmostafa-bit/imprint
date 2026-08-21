@@ -4,6 +4,7 @@ import type { Quad } from "./geometry";
 import { poseFromQuad, quadArea } from "./geometry";
 import { logoDpi } from "./mark-size";
 import { markBodyRatio } from "./fit-mark";
+import { judgeCatalogAngle, judgePoseRoll } from "./angle";
 
 export type QcFlag = {
   level: "warn" | "block";
@@ -126,6 +127,7 @@ export function inspectPlacement(opts: {
   invert: boolean;
   bodyWidth?: number;
   zoneWidth?: number;
+  catalogQuad?: Quad;
 }): QcFlag[] {
   const flags: QcFlag[] = [];
   if (!opts.allowed.includes(opts.method)) {
@@ -171,13 +173,24 @@ export function inspectPlacement(opts: {
       text: "Print zone is tiny. Check the SKU photo lock.",
     });
   }
-  const pose = poseFromQuad(opts.quad);
-  if (Math.abs(pose.yawDeg) > 55) {
-    flags.push({
-      level: "warn",
-      code: "angle",
-      text: "Extreme yaw — the far edge will foreshorten the mark. Prefer a flatter SKU angle for the quote pack.",
-    });
+  if (opts.catalogQuad) {
+    const judged = judgeCatalogAngle(opts.quad, opts.catalogQuad);
+    if (judged.band !== "ok") {
+      flags.push({
+        level: "warn",
+        code: "angle",
+        text: judged.note,
+      });
+    }
+  } else {
+    const roll = judgePoseRoll(poseFromQuad(opts.quad));
+    if (roll) {
+      flags.push({
+        level: "warn",
+        code: "angle",
+        text: roll.note,
+      });
+    }
   }
   if (opts.productTone === "dark" && !opts.invert && METHODS[opts.method].ink) {
     flags.push({

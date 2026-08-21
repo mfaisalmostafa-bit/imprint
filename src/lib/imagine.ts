@@ -1,7 +1,8 @@
 import { createServerFn } from "@tanstack/react-start";
+import { ANGLE_PROMPT } from "./angle";
 
 const PREFIX =
-  "Photorealistic commercial product photograph, empty branding, no logos, no typography, no watermarks. Printable surface clearly visible, catalog lighting, sharp focus. Subject: ";
+  "Photorealistic commercial B2B catalog product photograph, empty branding, no logos, no typography, no watermarks. Catalog lighting, sharp focus. ";
 
 async function urlToDataUrl(url: string): Promise<string> {
   const res = await fetch(url);
@@ -22,16 +23,18 @@ function pickImage(body: {
 }
 
 export const generateProduct = createServerFn({ method: "POST" })
-  .validator((input: { prompt: string }) => {
+  .validator((input: { prompt: string; angle?: string }) => {
     const prompt = (input?.prompt ?? "").trim();
     if (prompt.length < 4) throw new Error("Describe the product to generate");
     if (prompt.length > 400) throw new Error("Keep the prompt under 400 characters");
-    return { prompt };
+    const angle = (input?.angle ?? "").trim().slice(0, 280);
+    return { prompt, angle };
   })
   .handler(async ({ data }): Promise<{ ok: true; src: string } | { ok: false; error: string }> => {
     const apiKey = process.env.XAI_API_KEY;
     if (!apiKey) return { ok: false, error: "Imagine is unavailable in this environment." };
 
+    const camera = data.angle || ANGLE_PROMPT;
     const res = await fetch("https://api.x.ai/v1/images/generations", {
       method: "POST",
       headers: {
@@ -40,7 +43,7 @@ export const generateProduct = createServerFn({ method: "POST" })
       },
       body: JSON.stringify({
         model: "grok-imagine-image-2.0",
-        prompt: PREFIX + data.prompt,
+        prompt: PREFIX + camera + " Subject: " + data.prompt,
         n: 1,
         resolution: "1k",
         response_format: "b64_json",

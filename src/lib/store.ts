@@ -25,6 +25,7 @@ import type { Treatment } from "./treat";
 import type { JobKind } from "./cc";
 import { recallPlacement, rememberPlacement } from "./placement-memory";
 import { fitMarkScale, zoneForFit } from "./fit-mark";
+import { judgeCatalogAngle } from "./angle";
 
 export type LogoAsset = {
   id: string;
@@ -416,8 +417,21 @@ export const useStudio = create<StudioState>((set, get) => ({
       const preferred = "scale" in mock && s.mockupId !== "custom" ? mock.scale : s.scale;
       const detected = result.quad;
       const trusted = "bodyTrusted" in result ? result.bodyTrusted : quadBBox(detected).w < 0.95;
-      const keepCatalog = !trusted && s.mockupId !== "custom";
-      const quad = keepCatalog ? s.quad : zoneForFit(detected, trusted);
+      const catalog = s.mockupId !== "custom" && "quad" in mock ? mock.quad : null;
+      const keepUntrusted = Boolean(catalog && !trusted);
+      let quad = keepUntrusted ? s.quad : zoneForFit(detected, trusted);
+      let keepCatalog = keepUntrusted;
+      let note: string | null = null;
+      if (catalog) {
+        const judged = judgeCatalogAngle(quad, catalog);
+        if (!judged.ok) {
+          quad = cloneQuad(catalog);
+          keepCatalog = true;
+          note = judged.note;
+        } else if (judged.band === "soft") {
+          note = judged.note;
+        }
+      }
       const bodyWidth = bodyWidthOf(result, quad);
       const fit = fitMarkScale({
         bodyWidth,
@@ -436,11 +450,11 @@ export const useStudio = create<StudioState>((set, get) => ({
         surfaceLabel: "surface" in result ? result.surface : s.surfaceLabel,
         material: "material" in result ? result.material : s.material,
         confidence: result.confidence,
-        brainNote: fit.trusted ? result.notes : fit.note,
+        brainNote: note ?? (fit.trusted ? result.notes : fit.note),
         scanning: false,
         scanError: null,
-        scale: fit.scale,
-        scaleCap: fit.cap,
+        scale: keepCatalog ? preferred : fit.scale,
+        scaleCap: maxScale,
       };
     }),
   setScanning: (v) => set({ scanning: v, scanError: v ? null : get().scanError }),

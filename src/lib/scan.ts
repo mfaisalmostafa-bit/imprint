@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import type { Quad } from "./geometry";
 import { clampQuad, isConvexQuad, quadArea } from "./geometry";
+import { ANGLE_PROMPT } from "./angle";
 
 const PointSchema = z.object({
   x: z.number(),
@@ -38,6 +39,9 @@ export type ScanFailure = { ok: false; error: string };
 const SCAN_PROMPT = `You are a print-placement engineer locking a logo onto a product photograph.
 
 Find the primary printable/brandable surface (shirt chest — not sleeves or collar; mug/cup front wall — not the handle; box facing camera; billboard face; bag panel; cap front crown; notebook cover).
+
+Camera: ${ANGLE_PROMPT}
+Lock the print face that matches that catalog angle — not a side, gusset, brim top, or handle.
 
 Return ONLY JSON:
 {

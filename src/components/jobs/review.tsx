@@ -20,6 +20,7 @@ import {
 import { fetchOverride, listOverrides, persistOverride } from "@/lib/placement-api";
 import { copyText } from "@/lib/copy-text";
 import { LOUPE_ZOOM, type PlaceTool } from "@/lib/place";
+import { angleGuideFor, judgeCatalogAngle } from "@/lib/angle";
 import { cn } from "@/lib/utils";
 
 function fingerprint(quad: ReturnType<typeof quadToEngine>, wrap: string, arc: number) {
@@ -54,6 +55,7 @@ export function ReviewScreen() {
   const quad = useStudio((s) => s.quad);
   const maxScale = "maxScale" in mockup ? mockup.maxScale : 0.96;
   const scaleCap = useStudio((s) => s.scaleCap);
+  const resetPlacement = useStudio((s) => s.resetPlacement);
   const [note, setNote] = useState("Click the zoom window to pin a corner. Minimise it when you need the photo.");
   const [origin, setOrigin] = useState<"detected" | "override">("detected");
   const [base, setBase] = useState("");
@@ -76,6 +78,9 @@ export function ReviewScreen() {
     [engineQuad, wrap, cylinderArc, base],
   );
   const source = dirty ? "edited" : origin;
+  const guide = angleGuideFor({ id: mockup.id, category: mockup.category });
+  const catalogQuad = mockupId !== "custom" && "quad" in mockup ? mockup.quad : null;
+  const judged = catalogQuad ? judgeCatalogAngle(quad, catalogQuad) : null;
 
   useEffect(() => {
     let live = true;
@@ -278,6 +283,17 @@ export function ReviewScreen() {
               setWinOpen(false);
             }}
             onGesture={pushHistory}
+            guideLabel={guide.label}
+            angleBand={judged?.band ?? null}
+            onCatalogAngle={
+              catalogQuad
+                ? () => {
+                    resetPlacement();
+                    setNote(guide.label + ". " + guide.prompt);
+                    stageRef.current?.zoomFit();
+                  }
+                : null
+            }
           />
         ) : null}
       </div>

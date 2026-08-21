@@ -9,6 +9,7 @@ import { inspectPlacement, inspectSubstrate } from "@/lib/qc";
 import { formatMarkSize, markSizeMm } from "@/lib/mark-size";
 import { OrderBoard } from "@/components/studio/order-board";
 import { SPOT_SWATCHES, type Treatment } from "@/lib/treat";
+import { angleGuideFor, judgeCatalogAngle } from "@/lib/angle";
 import { cn } from "@/lib/utils";
 
 function Row({
@@ -83,6 +84,7 @@ export function BrainPanel({ onScan }: { onScan: () => void }) {
       allowed,
       productTone: "tone" in mockup ? mockup.tone : "mid",
       invert,
+      catalogQuad: mockup.id !== "custom" && "quad" in mockup ? mockup.quad : undefined,
     }),
     ...inspectSubstrate({
       method,
@@ -90,6 +92,9 @@ export function BrainPanel({ onScan }: { onScan: () => void }) {
       category: "category" in mockup ? String(mockup.category) : "",
     }),
   ];
+  const guide = angleGuideFor({ id: mockup.id, category: mockup.category });
+  const catalogQuad = mockup.id !== "custom" && "quad" in mockup ? mockup.quad : null;
+  const judged = catalogQuad ? judgeCatalogAngle(quad, catalogQuad) : null;
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-6 overflow-y-auto p-4">
@@ -202,6 +207,12 @@ export function BrainPanel({ onScan }: { onScan: () => void }) {
 
       <div className="space-y-3">
         <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Pose</p>
+        <p className="text-xs text-muted-foreground">{guide.label}</p>
+        {judged ? (
+          <p className={judged.band === "off" ? "text-xs text-primary" : "text-xs text-muted-foreground"}>
+            {judged.note}
+          </p>
+        ) : null}
         <div className="flex h-24 items-center justify-center rounded-lg bg-secondary" style={{ perspective: "420px" }}>
           <div
             className="gizmo-plane size-14 rounded-sm bg-primary/20 shadow-[var(--shadow-border)]"

@@ -55,6 +55,9 @@ export function PlaceWindow({
   compare,
   onClose,
   onGesture,
+  guideLabel,
+  angleBand,
+  onCatalogAngle,
 }: {
   stageRef: { current: StageHandle | null };
   onLoupeCanvas: (el: HTMLCanvasElement | null) => void;
@@ -91,6 +94,9 @@ export function PlaceWindow({
   compare: boolean;
   onClose: () => void;
   onGesture: () => void;
+  guideLabel: string;
+  angleBand: "ok" | "soft" | "off" | null;
+  onCatalogAngle: (() => void) | null;
 }) {
   const hostRef = useRef<HTMLCanvasElement>(null);
 
@@ -137,6 +143,12 @@ export function PlaceWindow({
           <p className="text-xs capitalize text-muted-foreground">
             {source} · {METHODS[method].label}
           </p>
+          <p className="text-xs text-muted-foreground">{guideLabel}</p>
+          {angleBand && angleBand !== "ok" ? (
+            <p className={angleBand === "off" ? "text-xs text-primary" : "text-xs text-muted-foreground"}>
+              {angleBand === "off" ? "Off catalog angle" : "Soft on catalog angle"}
+            </p>
+          ) : null}
         </div>
 
         <div className="relative aspect-square w-full overflow-hidden rounded-lg bg-paper shadow-[var(--shadow-border)]">
@@ -263,6 +275,9 @@ export function PlaceWindow({
           <Mini onClick={() => stageRef.current?.zoomZone()}>Zone</Mini>
           <Mini onClick={() => stageRef.current?.zoomBy(0.8)}>−</Mini>
           <Mini onClick={() => stageRef.current?.zoomBy(1.25)}>+</Mini>
+          {onCatalogAngle ? (
+            <Mini onClick={onCatalogAngle}>Catalog angle</Mini>
+          ) : null}
           <Mini onClick={onUndo} disabled={!canUndo}>
             <Undo2 className="size-3.5" />
           </Mini>

@@ -21,6 +21,7 @@ import type { JobKind } from "@/lib/cc";
 import { formatMarkSize, markSizeMm } from "@/lib/mark-size";
 import { loadOrder } from "@/lib/order";
 import { MOCKUPS } from "@/lib/mockups";
+import { angleGuideFor } from "@/lib/angle";
 
 export function StudioApp() {
   const stageRef = useRef<StageHandle>(null);
@@ -127,6 +128,7 @@ export function StudioApp() {
       allowed: "methods" in mockup ? mockup.methods : [method],
       productTone: "tone" in mockup ? mockup.tone : "mid",
       invert,
+      catalogQuad: mockupId !== "custom" && "quad" in mockup ? mockup.quad : undefined,
     });
     const hold = inspectSubstrate({
       method,
@@ -198,6 +200,7 @@ export function StudioApp() {
           allowed: m.methods,
           productTone: m.tone,
           invert: st.invert,
+          catalogQuad: m.quad,
         }).map((f) => f.text),
         settings: `${st.method}  qty ${line.qty}`,
       });
@@ -247,7 +250,8 @@ export function StudioApp() {
     setGenerating(true);
     setMode("studio");
     try {
-      const result = await generateProduct({ data: { prompt } });
+      const guide = angleGuideFor({ id: mockup.id, category: mockup.category });
+      const result = await generateProduct({ data: { prompt, angle: guide.prompt } });
       if (!result.ok) {
         setScanError(result.error);
         toast(result.error);

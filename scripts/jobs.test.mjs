@@ -151,6 +151,7 @@ test("Place is the main job and the placement window can minimise", () => {
   assert.match(placeWin, /Placement zoom window/);
   assert.match(placeWin, /click to place/);
   assert.match(stageSrc, /click to place/);
+  assert.match(placeWin, /Catalog angle/);
 });
 
 test("placement math moves corners, edges, and refuses a concave quad", async () => {

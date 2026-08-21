@@ -70,6 +70,7 @@ test("applyScan and detect carry the high-side guard", () => {
   assert.match(store, /fitMarkScale/);
   assert.match(store, /zoneForFit/);
   assert.match(store, /scaleCap/);
+  assert.match(store, /judgeCatalogAngle/);
   assert.match(detect, /bodyTrusted/);
   assert.match(detect, /bodyWidth/);
   assert.doesNotMatch(store + detect, /DEAD_IMAGE_CAP/);
