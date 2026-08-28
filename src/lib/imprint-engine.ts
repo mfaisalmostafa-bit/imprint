@@ -317,7 +317,8 @@ export function zoneForClass(body: Quad, cls: MarkClass): Quad {
       return rectQuad(cx, cy - b.h * 0.06, b.w * 0.62, b.h * 0.32);
     }
     case "bottle":
-      return rectQuad(cx, b.y + b.h * 0.5, b.w * 0.7, b.h * 0.32);
+      if (b.w > b.h * 1.15) return rectQuad(cx, cy, b.w * 0.32, b.h * 0.42);
+      return rectQuad(cx, b.y + b.h * 0.48, b.w * 0.34, b.h * 0.36);
     case "bag":
       return rectQuad(cx, b.y + b.h * 0.44, b.w * 0.4, b.h * 0.28);
     case "cable": {
@@ -325,7 +326,7 @@ export function zoneForClass(body: Quad, cls: MarkClass): Quad {
       return rectQuad(cx, cy, s, s);
     }
     case "notebook":
-      return rectQuad(cx, b.y + b.h * 0.62, b.w * 0.56, b.h * 0.18);
+      return rectQuad(b.x + b.w * 0.4, b.y + b.h * 0.36, b.w * 0.5, b.h * 0.16);
     case "apparel":
       return rectQuad(b.x + b.w * 0.38, b.y + b.h * 0.34, b.w * 0.22, b.h * 0.16);
     case "tech":
@@ -485,6 +486,587 @@ export function discQuad(body: Quad): Quad {
   return rectQuad(b.x + b.w / 2, b.y + b.h / 2, s, s);
 }
 
+export type HygieneFinding = { code: "lifestyle" | "spec-strip" | "chrome" | "existing-art"; text: string };
+
+export type ZoneKind = "demo" | "panel" | "class";
+
+export type ZoneCandidate = {
+  id: ZoneKind;
+  label: string;
+  quad: Quad;
+  score: number;
+  veto: string | null;
+};
+
+export type SurfaceMaps = {
+  strap: CropRect | null;
+  clasp: CropRect | null;
+  ribs: CropRect | null;
+  specular: CropRect[];
+  demo: CropRect | null;
+  panel: CropRect | null;
+};
+
+function overlapFrac(a: CropRect, b: CropRect) {
+  const x = Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x));
+  const y = Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y));
+  return (x * y) / Math.max(1e-6, a.w * a.h);
+}
+
+function boxToQuad(c: CropRect): Quad {
+  return cropToQuad({
+    x: clamp(c.x, 0.02, 0.96),
+    y: clamp(c.y, 0.02, 0.96),
+    w: clamp(c.w, 0.04, 0.96),
+    h: clamp(c.h, 0.04, 0.96),
+  });
+}
+
+function quadToBox(q: Quad): CropRect {
+  return boxOf(q);
+}
+
+function shiftBox(b: CropRect, dx: number, dy: number): CropRect {
+  return { x: b.x + dx, y: b.y + dy, w: b.w, h: b.h };
+}
+
+function bodyBBox(w: number, h: number, mask: Uint8Array): CropRect | null {
+  let x0 = w,
+    y0 = h,
+    x1 = 0,
+    y1 = 0,
+    n = 0;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (!mask[y * w + x]) continue;
+      n++;
+      if (x < x0) x0 = x;
+      if (x > x1) x1 = x;
+      if (y < y0) y0 = y;
+      if (y > y1) y1 = y;
+    }
+  }
+  if (n < 20) return null;
+  return { x: x0 / w, y: y0 / h, w: (x1 - x0 + 1) / w, h: (y1 - y0 + 1) / h };
+}
+
+function connectedBoxes(
+  on: Uint8Array,
+  gw: number,
+  gh: number,
+  ox: number,
+  oy: number,
+  cw: number,
+  ch: number,
+): CropRect[] {
+  const seen = new Uint8Array(on.length);
+  const out: CropRect[] = [];
+  for (let i = 0; i < on.length; i++) {
+    if (!on[i] || seen[i]) continue;
+    const stack = [i];
+    seen[i] = 1;
+    let minX = gw,
+      minY = gh,
+      maxX = 0,
+      maxY = 0,
+      n = 0;
+    while (stack.length) {
+      const p = stack.pop()!;
+      const x = p % gw;
+      const y = (p / gw) | 0;
+      n++;
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+      const neigh = [p - 1, p + 1, p - gw, p + gw];
+      const ok = [x > 0, x + 1 < gw, y > 0, y + 1 < gh];
+      for (let k = 0; k < 4; k++) {
+        if (!ok[k]) continue;
+        const q = neigh[k]!;
+        if (on[q] && !seen[q]) {
+          seen[q] = 1;
+          stack.push(q);
+        }
+      }
+    }
+    if (n < 2) continue;
+    out.push({
+      x: ox + (minX / gw) * cw,
+      y: oy + (minY / gh) * ch,
+      w: ((maxX - minX + 1) / gw) * cw,
+      h: ((maxY - minY + 1) / gh) * ch,
+    });
+  }
+  out.sort((a, b) => b.w * b.h - a.w * a.h);
+  return out;
+}
+
+/**
+ * Read the product surface. Hardware, specular, ribs, and a flat panel —
+ * all body-relative, so a packed catalogue shot and a 1400 canvas agree.
+ */
+export function readSurface(opts: {
+  w: number;
+  h: number;
+  lum: Float32Array;
+  mask: Uint8Array;
+  body?: CropRect | null;
+}): SurfaceMaps {
+  const { w, h, lum, mask } = opts;
+  const empty: SurfaceMaps = { strap: null, clasp: null, ribs: null, specular: [], demo: null, panel: null };
+  const body = opts.body ?? bodyBBox(w, h, mask);
+  if (!body) return empty;
+  const GW = 24;
+  const GH = 24;
+  const mean = new Float32Array(GW * GH);
+  const vari = new Float32Array(GW * GH);
+  const gx = new Float32Array(GW * GH);
+  const hit = new Uint8Array(GW * GH);
+  const x0 = body.x * w;
+  const y0 = body.y * h;
+  const cw = body.w * w;
+  const ch = body.h * h;
+  const cellW = cw / GW;
+  const cellH = ch / GH;
+  const vals: number[] = [];
+  for (let gy = 0; gy < GH; gy++) {
+    for (let gx_ = 0; gx_ < GW; gx_++) {
+      const i = gy * GW + gx_;
+      const sx = x0 + gx_ * cellW;
+      const sy = y0 + gy * cellH;
+      let s = 0,
+        s2 = 0,
+        n = 0;
+      const xA = Math.max(0, Math.floor(sx));
+      const xB = Math.min(w, Math.ceil(sx + cellW));
+      const yA = Math.max(0, Math.floor(sy));
+      const yB = Math.min(h, Math.ceil(sy + cellH));
+      for (let y = yA; y < yB; y++) {
+        for (let x = xA; x < xB; x++) {
+          if (!mask[y * w + x]) continue;
+          const v = lum[y * w + x]!;
+          s += v;
+          s2 += v * v;
+          n++;
+        }
+      }
+      if (n < 2) continue;
+      hit[i] = 1;
+      const m = s / n;
+      mean[i] = m;
+      vari[i] = Math.max(0, s2 / n - m * m);
+      vals.push(m);
+    }
+  }
+  for (let gy = 0; gy < GH; gy++) {
+    for (let gx_ = 0; gx_ < GW - 1; gx_++) {
+      const i = gy * GW + gx_;
+      if (hit[i] && hit[i + 1]) gx[i] = Math.abs(mean[i]! - mean[i + 1]!);
+    }
+  }
+  if (vals.length < 8) return empty;
+  const sorted = [...vals].sort((a, b) => a - b);
+  const med = sorted[(sorted.length * 0.5) | 0]!;
+  const p92 = sorted[(sorted.length * 0.92) | 0]!;
+  const span = Math.max(8, p92 - sorted[(sorted.length * 0.1) | 0]!);
+
+  const rowMean = new Float32Array(GH);
+  const rowN = new Float32Array(GH);
+  for (let gy = 0; gy < GH; gy++) {
+    let s = 0,
+      n = 0;
+    for (let gx_ = 0; gx_ < GW; gx_++) {
+      const i = gy * GW + gx_;
+      if (!hit[i]) continue;
+      s += mean[i]!;
+      n++;
+    }
+    rowN[gy] = n;
+    rowMean[gy] = n ? s / n : med;
+  }
+  let strap: CropRect | null = null;
+  let bestStrap = 0;
+  for (let a = 0; a < GH; a++) {
+    for (let b = a; b < Math.min(GH, a + 4); b++) {
+      let s = 0,
+        n = 0;
+      for (let y = a; y <= b; y++) {
+        if (rowN[y] < GW * 0.35) continue;
+        s += Math.abs(rowMean[y]! - med);
+        n++;
+      }
+      const score = n ? s / n : 0;
+      const thick = (b - a + 1) / GH;
+      if (score > bestStrap && score > span * 0.22 && thick >= 0.04 && thick <= 0.16) {
+        bestStrap = score;
+        strap = {
+          x: body.x,
+          y: body.y + (a / GH) * body.h,
+          w: body.w,
+          h: thick * body.h,
+        };
+      }
+    }
+  }
+
+  let clasp: CropRect | null = null;
+  let bestClasp = 0;
+  for (let gy = Math.floor(GH * 0.28); gy < GH * 0.78; gy++) {
+    for (let gx_ = Math.floor(GW * 0.55); gx_ < GW - 1; gx_++) {
+      for (let hh = 2; hh <= 6; hh++) {
+        for (let ww = 2; ww <= 6; ww++) {
+          if (gy + hh > GH || gx_ + ww > GW) continue;
+          let s = 0,
+            v = 0,
+            n = 0;
+          for (let y = gy; y < gy + hh; y++) {
+            for (let x = gx_; x < gx_ + ww; x++) {
+              const i = y * GW + x;
+              if (!hit[i]) continue;
+              s += mean[i]!;
+              v += vari[i]!;
+              n++;
+            }
+          }
+          if (n < 3) continue;
+          const aspect = ww / hh;
+          if (aspect < 0.35 || aspect > 2.8) continue;
+          const score = v / n + Math.abs(s / n - med);
+          const area = (ww / GW) * (hh / GH);
+          if (score > bestClasp && score > span * 0.18 && area >= 0.01 && area <= 0.12) {
+            bestClasp = score;
+            clasp = {
+              x: body.x + (gx_ / GW) * body.w,
+              y: body.y + (gy / GH) * body.h,
+              w: (ww / GW) * body.w,
+              h: (hh / GH) * body.h,
+            };
+          }
+        }
+      }
+    }
+  }
+
+  const specOn = new Uint8Array(GW * GH);
+  for (let i = 0; i < specOn.length; i++) {
+    if (hit[i] && mean[i]! >= p92 && mean[i]! >= med + span * 0.35) specOn[i] = 1;
+  }
+  const specular = connectedBoxes(specOn, GW, GH, body.x, body.y, body.w, body.h).filter((c) => {
+    const thin = Math.min(c.w, c.h) / Math.max(c.w, c.h) < 0.32;
+    const small = c.w * c.h < body.w * body.h * 0.12;
+    return thin || (small && Math.max(c.w, c.h) < Math.max(body.w, body.h) * 0.35);
+  });
+
+  const colGx = new Float32Array(GW);
+  for (let gx_ = 0; gx_ < GW; gx_++) {
+    let s = 0,
+      n = 0;
+    for (let gy = 0; gy < GH; gy++) {
+      const i = gy * GW + gx_;
+      if (!hit[i]) continue;
+      s += gx[i]!;
+      n++;
+    }
+    colGx[gx_] = n ? s / n : 0;
+  }
+  const gxMed = [...colGx].sort((a, b) => a - b)[(GW * 0.5) | 0] || 1;
+  const ribCols: number[] = [];
+  for (let gx_ = 0; gx_ < GW; gx_++) if (colGx[gx_]! > gxMed * 1.7) ribCols.push(gx_);
+  let ribs: CropRect | null = null;
+  if (ribCols.length >= GW * 0.28) {
+    ribs = {
+      x: body.x + (Math.min(...ribCols) / GW) * body.w,
+      y: body.y,
+      w: ((Math.max(...ribCols) - Math.min(...ribCols) + 1) / GW) * body.w,
+      h: body.h,
+    };
+  }
+
+  const flatOn = new Uint8Array(GW * GH);
+  for (let gy = 0; gy < GH; gy++) {
+    for (let gx_ = 0; gx_ < GW; gx_++) {
+      const i = gy * GW + gx_;
+      if (!hit[i]) continue;
+      const cell: CropRect = {
+        x: body.x + (gx_ / GW) * body.w,
+        y: body.y + (gy / GH) * body.h,
+        w: body.w / GW,
+        h: body.h / GH,
+      };
+      const hard =
+        (strap && overlapFrac(cell, strap) > 0.35) ||
+        (clasp && overlapFrac(cell, clasp) > 0.35) ||
+        specular.some((s) => overlapFrac(cell, s) > 0.4);
+      const ribbed = ribs && overlapFrac(cell, ribs) > 0.5 && gx[i]! > gxMed * 1.4;
+      if (!hard && !ribbed && vari[i]! < span * span * 0.08) flatOn[i] = 1;
+    }
+  }
+  const flats = connectedBoxes(flatOn, GW, GH, body.x, body.y, body.w, body.h);
+  const panel = flats.find((c) => (c.w * c.h) / (body.w * body.h) >= 0.05) ?? null;
+
+  let demo: CropRect | null = null;
+  let bestDemo = 0;
+  for (let gy = 2; gy < GH - 2; gy++) {
+    for (let gx_ = 2; gx_ < GW - 2; gx_++) {
+      for (let hh = 2; hh <= 7; hh++) {
+        for (let ww = 3; ww <= 10; ww++) {
+          if (gy + hh >= GH || gx_ + ww >= GW) continue;
+          let s = 0,
+            v = 0,
+            n = 0;
+          for (let y = gy; y < gy + hh; y++) {
+            for (let x = gx_; x < gx_ + ww; x++) {
+              const i = y * GW + x;
+              if (!hit[i]) continue;
+              s += mean[i]!;
+              v += vari[i]!;
+              n++;
+            }
+          }
+          if (n < 6) continue;
+          const box: CropRect = {
+            x: body.x + (gx_ / GW) * body.w,
+            y: body.y + (gy / GH) * body.h,
+            w: (ww / GW) * body.w,
+            h: (hh / GH) * body.h,
+          };
+          const area = (box.w * box.h) / (body.w * body.h);
+          if (area < 0.03 || area > 0.18) continue;
+          const aspect = box.w / Math.max(1e-6, box.h);
+          if (aspect < 0.8 || aspect > 4) continue;
+          if (strap && overlapFrac(box, strap) > 0.25) continue;
+          if (clasp && overlapFrac(box, clasp) > 0.25) continue;
+          if (specular.some((s) => overlapFrac(box, s) > 0.3)) continue;
+          const struct = v / n;
+          if (struct < span * 0.4 || struct > span * span * 0.5) continue;
+          if (struct > bestDemo) {
+            bestDemo = struct;
+            demo = box;
+          }
+        }
+      }
+    }
+  }
+
+  return { strap, clasp, ribs, specular, demo, panel };
+}
+
+function fitInPanel(panel: CropRect, cls: MarkClass, body: CropRect): CropRect {
+  const prior = quadToBox(zoneForClass(cropToQuad(body), cls));
+  const tw = Math.min(panel.w * 0.9, prior.w);
+  const th = Math.min(panel.h * 0.9, prior.h);
+  return {
+    x: clamp(panel.x + panel.w / 2 - tw / 2, panel.x, panel.x + panel.w - tw),
+    y: clamp(panel.y + panel.h / 2 - th / 2, panel.y, panel.y + panel.h - th),
+    w: tw,
+    h: th,
+  };
+}
+
+function obstaclesOf(maps: SurfaceMaps): CropRect[] {
+  const o: CropRect[] = [];
+  if (maps.strap) o.push(maps.strap);
+  if (maps.clasp) o.push(maps.clasp);
+  if (maps.ribs) o.push(maps.ribs);
+  o.push(...maps.specular);
+  return o;
+}
+
+function vetoOf(box: CropRect, maps: SurfaceMaps, cls: MarkClass): string | null {
+  if (maps.strap && overlapFrac(box, maps.strap) > 0.22) return "hardware";
+  if (maps.clasp && overlapFrac(box, maps.clasp) > 0.22) return "hardware";
+  if (maps.specular.some((s) => overlapFrac(box, s) > 0.28)) return "specular";
+  if (cls === "notebook" && maps.ribs && overlapFrac(box, maps.ribs) > 0.45) return "ribs";
+  return null;
+}
+
+function nudgeOffHardware(box: CropRect, maps: SurfaceMaps, body: CropRect, cls: MarkClass): CropRect {
+  const obs = obstaclesOf(maps);
+  if (!obs.length) return box;
+  const tries: CropRect[] = [box];
+  if (maps.strap) {
+    tries.push(shiftBox(box, 0, maps.strap.y - box.h - 0.02 - box.y));
+    tries.push(shiftBox(box, 0, maps.strap.y + maps.strap.h + 0.02 - box.y));
+  }
+  if (maps.clasp) {
+    tries.push(shiftBox(box, maps.clasp.x - box.w - 0.02 - box.x, 0));
+  }
+  if (cls === "bottle") {
+    tries.push({ x: body.x + body.w * 0.33, y: body.y + body.h * 0.38, w: body.w * 0.34, h: body.h * 0.36 });
+  }
+  let best = box;
+  let bestPen = 99;
+  for (const t of tries) {
+    if (t.w < 0.04 || t.h < 0.04) continue;
+    const clamped = {
+      x: clamp(t.x, body.x, body.x + body.w - t.w),
+      y: clamp(t.y, body.y, body.y + body.h - t.h),
+      w: t.w,
+      h: t.h,
+    };
+    let pen = 0;
+    for (const o of obs) pen += overlapFrac(clamped, o);
+    if (pen < bestPen) {
+      bestPen = pen;
+      best = clamped;
+    }
+  }
+  return best;
+}
+
+/**
+ * Class recipe is a prior, not the lock.
+ * Rank: existing demo print > detected flat panel > nudged class prior.
+ * Specular, clasp, strap, ribs veto a candidate. The picker must not recommend a veto.
+ */
+export function pickZone(opts: {
+  cls: MarkClass;
+  body: Quad;
+  w?: number;
+  h?: number;
+  lum?: Float32Array;
+  mask?: Uint8Array;
+}): { winner: ZoneCandidate; candidates: ZoneCandidate[]; maps: SurfaceMaps } {
+  const cls = opts.cls;
+  const bodyBox = boxOf(opts.body);
+  const classBox0 = quadToBox(zoneForClass(opts.body, cls));
+  let maps: SurfaceMaps = { strap: null, clasp: null, ribs: null, specular: [], demo: null, panel: null };
+  if (opts.w && opts.h && opts.lum && opts.mask) {
+    maps = readSurface({ w: opts.w, h: opts.h, lum: opts.lum, mask: opts.mask, body: bodyBox });
+    const ph = cls === "tech" || cls === "default" ? placeholderRect({ w: opts.w, h: opts.h, lum: opts.lum, mask: opts.mask }) : null;
+    if (ph && !maps.panel) maps.panel = ph;
+    else if (ph && maps.panel && ph.w * ph.h < maps.panel.w * maps.panel.h * 1.4) {
+      const specish = maps.specular.some((s) => overlapFrac(ph, s) > 0.4);
+      if (!specish) maps.demo = maps.demo ?? ph;
+    }
+    if (maps.panel) maps.panel = fitInPanel(maps.panel, cls, bodyBox);
+  }
+  const classBox = nudgeOffHardware(classBox0, maps, bodyBox, cls);
+  const candidates: ZoneCandidate[] = [];
+  const push = (id: ZoneKind, label: string, box: CropRect | null, score: number) => {
+    if (!box) return;
+    candidates.push({
+      id,
+      label,
+      quad: boxToQuad(box),
+      score,
+      veto: vetoOf(box, maps, cls),
+    });
+  };
+  push("demo", "where the demo print already is", maps.demo, 100);
+  push("panel", "the flat panel", maps.panel, 70);
+  push("class", "the usual place for this category", classBox, 40);
+  const live = candidates.filter((c) => !c.veto);
+  const winner =
+    live.sort((a, b) => b.score - a.score)[0] ??
+    candidates.find((c) => c.id === "class") ??
+    ({
+      id: "class" as const,
+      label: "the usual place for this category",
+      quad: zoneForClass(opts.body, cls),
+      score: 40,
+      veto: null,
+    } satisfies ZoneCandidate);
+  return { winner, candidates, maps };
+}
+
+export function recommendPlacement(opts: {
+  cls: MarkClass;
+  body: Quad;
+  w?: number;
+  h?: number;
+  lum?: Float32Array;
+  mask?: Uint8Array;
+}) {
+  const picked = pickZone(opts);
+  const byId = (id: ZoneKind) => picked.candidates.find((c) => c.id === id) ?? null;
+  const order: ZoneKind[] = ["demo", "panel", "class"];
+  const pick = order.find((id) => {
+    const c = byId(id);
+    return c && !c.veto;
+  }) ?? "class";
+  return { pick, choices: picked.candidates, winner: picked.winner, maps: picked.maps };
+}
+
+export function canvasHygiene(opts: {
+  w: number;
+  h: number;
+  lum: Float32Array;
+  mask: Uint8Array;
+}): { ok: boolean; block: boolean; findings: HygieneFinding[] } {
+  const { w, h, lum, mask } = opts;
+  const findings: HygieneFinding[] = [];
+  const pad = Math.max(2, Math.round(Math.min(w, h) * 0.08));
+  const corner = (x0: number, y0: number) => {
+    const vs: number[] = [];
+    for (let y = y0; y < y0 + pad; y++) {
+      for (let x = x0; x < x0 + pad; x++) vs.push(lum[y * w + x]!);
+    }
+    const s = vs.reduce((a, b) => a + b, 0) / vs.length;
+    return s;
+  };
+  const corners = [corner(0, 0), corner(w - pad, 0), corner(0, h - pad), corner(w - pad, h - pad)];
+  const cMin = Math.min(...corners);
+  const cMax = Math.max(...corners);
+  if (cMax - cMin > 48) {
+    findings.push({
+      code: "lifestyle",
+      text: "Canvas is a lifestyle shot, not a studio plate. Isolate the product before sending.",
+    });
+  }
+  const body = bodyBBox(w, h, mask);
+  const topH = Math.max(3, Math.round(h * 0.12));
+  let topEdges = 0;
+  let topN = 0;
+  for (let y = 1; y < topH; y++) {
+    for (let x = 1; x < w - 1; x += 2) {
+      topN++;
+      if (Math.abs(lum[y * w + x]! - lum[y * w + x - 1]!) > 28) topEdges++;
+    }
+  }
+  const topInBody = body ? Math.max(0, Math.min(body.y + body.h, topH / h) - body.y) / Math.max(1e-6, topH / h) : 0;
+  if (topN && topEdges / topN > 0.22 && topInBody < 0.45) {
+    findings.push({
+      code: "chrome",
+      text: "Catalog chrome sits on the canvas (title, spec). Crop it off before the mark.",
+    });
+  }
+  if (body) {
+    const margin = 0.06;
+    let strip = false;
+    const bx0 = Math.round(body.x * w);
+    const by0 = Math.round(body.y * h);
+    const bx1 = Math.round((body.x + body.w) * w);
+    const by1 = Math.round((body.y + body.h) * h);
+    const edgeBlob = (x0: number, y0: number, x1: number, y1: number) => {
+      let n = 0;
+      let on = 0;
+      for (let y = y0; y < y1; y++) {
+        for (let x = x0; x < x1; x++) {
+          n++;
+          if (mask[y * w + x]) continue;
+          const v = lum[y * w + x]!;
+          if (v < 40 || v > 220) on++;
+        }
+      }
+      return n && on / n > 0.12 && on > 8;
+    };
+    if (edgeBlob(0, Math.max(0, by1), w, h)) strip = true;
+    if (edgeBlob(0, 0, w, Math.max(1, by0))) strip = true;
+    if (body.x > margin && edgeBlob(0, 0, bx0, h)) strip = true;
+    if (body.x + body.w < 1 - margin && edgeBlob(bx1, 0, w, h)) strip = true;
+    if (strip) {
+      findings.push({
+        code: "spec-strip",
+        text: "Spec strip on the canvas. Do not send until it is gone.",
+      });
+    }
+  }
+  const block = findings.some((f) => f.code === "spec-strip" || f.code === "chrome");
+  return { ok: findings.length === 0, block, findings };
+}
+
 export function assertZone(cls: MarkClass, body: Quad) {
   const z = zoneForClass(body, cls);
   const b = boxOf(body);
@@ -495,14 +1077,15 @@ export function assertZone(cls: MarkClass, body: Quad) {
     case "pen":
       return zb.w >= b.w * 0.4 && zb.h <= b.h * 0.8;
     case "bottle":
-      return cy > b.y + b.h * 0.28 && cy < b.y + b.h * 0.72 && zb.h <= b.h * 0.45;
+      return cy > b.y + b.h * 0.22 && cy < b.y + b.h * 0.78 && zb.w <= b.w * 0.55 && zb.h <= b.h * 0.5;
     case "bag":
       return zb.w / Math.max(1e-6, b.w) < 0.55 && cy < b.y + b.h * 0.7;
     case "cable":
       return Math.abs(zb.w - zb.h) < 0.04 && zb.w <= Math.min(b.w, b.h) * 0.6;
     case "notebook":
-      return zb.y > b.y + b.h * 0.4 && zb.h <= b.h * 0.28;
+      return zb.h <= b.h * 0.28 && zb.w <= b.w * 0.75 && zb.w >= b.w * 0.2;
     default:
       return zb.w > 0.02 && zb.h > 0.02 && cx > b.x && cx < b.x + b.w;
   }
 }
+

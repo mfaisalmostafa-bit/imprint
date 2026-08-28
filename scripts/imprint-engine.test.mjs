@@ -72,7 +72,8 @@ test("notebook smart-canvas crop keeps the cover, never a clasp clip", async () 
   const zone = m.zoneForClass(rect(body.x, body.y, body.w, body.h), "notebook");
   const h = zone[2].y - zone[1].y;
   assert.ok(h < body.h * 0.28, `band h=${h}`);
-  assert.ok(zone[0].y > body.y + body.h * 0.4, "band sits below the clasp");
+  const zb = m.boxOf(zone);
+  assert.ok(zb.w <= body.w * 0.75, "band is not a full-cover lock");
 });
 
 test("cable disc is square-on the round face; tech placeholder is body-relative", async () => {
@@ -183,3 +184,151 @@ test("house rails still hold in the engine", () => {
   const pen = mockups.split('id: "pen"')[1]?.slice(0, 900) ?? "";
   assert.match(pen, /invert: true/);
 });
+
+function paint(W, H, fill, fn) {
+  const lum = new Float32Array(W * H);
+  const mask = new Uint8Array(W * H);
+  lum.fill(fill);
+  fn(lum, mask, W, H);
+  return { lum, mask, w: W, h: H };
+}
+
+test("notebook zone stays off the strap and clasp; class prior is not the lock", async () => {
+  const m = await load("src/lib/imprint-engine.ts");
+  const W = 80,
+    H = 100;
+  const body = { x: 0.15, y: 0.08, w: 0.7, h: 0.84 };
+  const { lum, mask } = paint(W, H, 20, (L, M) => {
+    for (let y = Math.round(body.y * H); y < (body.y + body.h) * H; y++) {
+      for (let x = Math.round(body.x * W); x < (body.x + body.w) * W; x++) {
+        M[y * W + x] = 1;
+        L[y * W + x] = 70;
+      }
+    }
+    const strapY0 = Math.round((body.y + body.h * 0.48) * H);
+    const strapY1 = Math.round((body.y + body.h * 0.56) * H);
+    for (let y = strapY0; y < strapY1; y++) {
+      for (let x = Math.round(body.x * W); x < (body.x + body.w) * W; x++) L[y * W + x] = 30;
+    }
+    const cx0 = Math.round((body.x + body.w * 0.72) * W);
+    const cy0 = Math.round((body.y + body.h * 0.44) * H);
+    for (let y = cy0; y < cy0 + 10; y++) {
+      for (let x = cx0; x < cx0 + 10; x++) L[y * W + x] = 200;
+    }
+  });
+  const q = rect(body.x, body.y, body.w, body.h);
+  const rec = m.recommendPlacement({ cls: "notebook", body: q, w: W, h: H, lum, mask });
+  assert.notEqual(rec.pick, "class", "must not default to the category box when a panel exists or class is vetoed");
+  const zb = m.boxOf(rec.winner.quad);
+  const strap = { x: body.x, y: body.y + body.h * 0.48, w: body.w, h: body.h * 0.08 };
+  const clasp = { x: body.x + body.w * 0.72, y: body.y + body.h * 0.44, w: 0.12, h: 0.1 };
+  const overlap = (a, b) => {
+    const x = Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x));
+    const y = Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y));
+    return (x * y) / Math.max(1e-6, a.w * a.h);
+  };
+  assert.ok(overlap(zb, strap) < 0.25, `zone hits strap ${overlap(zb, strap)}`);
+  assert.ok(overlap(zb, clasp) < 0.25, `zone hits clasp ${overlap(zb, clasp)}`);
+});
+
+test("bottle specular is vetoed; mid-body wins", async () => {
+  const m = await load("src/lib/imprint-engine.ts");
+  const W = 60,
+    H = 120;
+  const body = { x: 0.32, y: 0.06, w: 0.36, h: 0.88 };
+  const { lum, mask } = paint(W, H, 18, (L, M) => {
+    for (let y = Math.round(body.y * H); y < (body.y + body.h) * H; y++) {
+      const t = (y / H - body.y) / body.h;
+      const half = body.w * (0.35 + 0.15 * Math.sin(t * Math.PI)) * W;
+      const cx = (body.x + body.w / 2) * W;
+      for (let x = Math.round(cx - half); x < cx + half; x++) {
+        M[y * W + x] = 1;
+        L[y * W + x] = 55;
+      }
+    }
+    for (let y = Math.round((body.y + 0.08) * H); y < (body.y + 0.34) * H; y++) {
+      const x = Math.round((body.x + body.w * 0.7) * W);
+      L[y * W + x] = 240;
+      L[y * W + x + 1] = 235;
+    }
+  });
+  const rec = m.recommendPlacement({
+    cls: "bottle",
+    body: rect(body.x, body.y, body.w, body.h),
+    w: W,
+    h: H,
+    lum,
+    mask,
+  });
+  const zb = m.boxOf(rec.winner.quad);
+  assert.equal(rec.winner.veto, null);
+  assert.notEqual(rec.winner.veto, "specular");
+  const spec = { x: body.x + body.w * 0.66, y: body.y + 0.08, w: 0.08, h: 0.26 };
+  const overlap = (a, b) => {
+    const x = Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x));
+    const y = Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y));
+    return (x * y) / Math.max(1e-6, a.w * a.h);
+  };
+  assert.ok(overlap(zb, spec) < 0.4, `locked onto specular ${overlap(zb, spec)}`);
+  assert.ok(zb.w <= body.w * 0.55, `bottle zone too wide ${zb.w}`);
+  const cy = zb.y + zb.h / 2;
+  assert.ok(cy > body.y + body.h * 0.22 && cy < body.y + body.h * 0.78);
+});
+
+test("placement picker never recommends the category box over a clean panel", async () => {
+  const m = await load("src/lib/imprint-engine.ts");
+  const W = 80,
+    H = 80;
+  const body = { x: 0.2, y: 0.2, w: 0.6, h: 0.6 };
+  const { lum, mask } = paint(W, H, 16, (L, M) => {
+    for (let y = 16; y < 64; y++) {
+      for (let x = 16; x < 64; x++) {
+        M[y * W + x] = 1;
+        L[y * W + x] = 80;
+      }
+    }
+    for (let y = 28; y < 40; y++) {
+      for (let x = 22; x < 50; x++) L[y * W + x] = 82;
+    }
+  });
+  const rec = m.recommendPlacement({
+    cls: "notebook",
+    body: rect(body.x, body.y, body.w, body.h),
+    w: W,
+    h: H,
+    lum,
+    mask,
+  });
+  assert.notEqual(rec.pick, "class");
+  const classChoice = rec.choices.find((c) => c.id === "class");
+  assert.ok(classChoice, "class prior still listed");
+});
+
+test("canvas hygiene blocks spec strips and lifestyle chrome", async () => {
+  const m = await load("src/lib/imprint-engine.ts");
+  const W = 80,
+    H = 80;
+  const { lum, mask } = paint(W, H, 210, (L, M) => {
+    for (let y = 18; y < 62; y++) {
+      for (let x = 22; x < 58; x++) {
+        M[y * W + x] = 1;
+        L[y * W + x] = 70;
+      }
+    }
+    for (let y = 0; y < 8; y++) {
+      for (let x = 4; x < 76; x++) L[y * W + x] = x % 3 === 0 ? 20 : 240;
+    }
+    for (let y = 70; y < 78; y++) {
+      for (let x = 8; x < 28; x++) L[y * W + x] = 15;
+    }
+    L[2] = 40;
+    L[W - 3] = 200;
+    L[(H - 2) * W + 2] = 90;
+    L[(H - 2) * W + (W - 3)] = 10;
+  });
+  const hyg = m.canvasHygiene({ w: W, h: H, lum, mask });
+  assert.equal(hyg.ok, false);
+  assert.equal(hyg.block, true);
+  assert.ok(hyg.findings.some((f) => f.code === "spec-strip" || f.code === "chrome" || f.code === "lifestyle"));
+});
+

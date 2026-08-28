@@ -109,7 +109,7 @@ test("applyScan and detect carry the high-side guard", () => {
   assert.match(store, /judgeCatalogAngle/);
   assert.match(detect, /bodyTrusted/);
   assert.match(detect, /bodyWidth/);
-  assert.match(detect, /zoneForClass/);
+  assert.match(detect, /pickZone/);
   assert.doesNotMatch(store + detect, /DEAD_IMAGE_CAP/);
   assert.doesNotMatch(brain, /min=\{0\.18\}/);
 });

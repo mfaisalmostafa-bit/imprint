@@ -6,13 +6,7 @@ import {
 } from "./geometry";
 import type { BlendMode, SurfaceTone, WrapMode } from "./mockups";
 import { bodyTrusted } from "./fit-mark";
-import {
-  cropToQuad,
-  discQuad,
-  placeholderRect,
-  zoneForClass,
-  type MarkClass,
-} from "./imprint-engine";
+import { discQuad, pickZone, canvasHygiene, type MarkClass } from "./imprint-engine";
 
 export type DetectResult = {
   accepted: boolean;
@@ -437,15 +431,12 @@ export function detectFromRgb(
   );
 
   let outQuad = quad;
+  const hyg = canvasHygiene({ w, h, lum: L, mask });
   if (markClass === "cable") {
     outQuad = discQuad(quad);
-  } else if (markClass === "tech") {
-    const lum = new Float32Array(n);
-    for (let i = 0; i < n; i++) lum[i] = L[i]!;
-    const ph = placeholderRect({ w, h, lum, mask });
-    outQuad = ph ? cropToQuad(ph) : zoneForClass(quad, markClass);
   } else if (markClass) {
-    outQuad = zoneForClass(quad, markClass);
+    const picked = pickZone({ cls: markClass, body: quad, w, h, lum: L, mask });
+    outQuad = picked.winner.quad;
   }
   if (prior && isConvexQuad(prior)) {
     if (!trustedBody && !markClass) {
@@ -496,20 +487,22 @@ export function detectFromRgb(
     bodyWidth,
     bodyTrusted: trustedBody,
     markClass,
-    notes: !trustedBody
-      ? "Body filled the frame — print zone kept, mark sized from the zone."
-      : markClass === "cable"
-        ? "Disc route — mark sits on the round face only."
-        : markClass === "notebook"
-          ? "Cover band — clasp and ribs left clear."
-          : markClass === "bottle"
-            ? "Mid-body print face — not the neck."
-            : markClass === "pen"
-              ? "Barrel band — readable, high contrast."
-              : markClass === "bag"
-                ? "Front panel — smaller than a half-body lock."
-                : wrap === "cylinder"
-                  ? "Local lock — curved wall from side falloff. Existing marks ignored."
-                  : "Local lock — silhouette vs backdrop. Existing marks ignored.",
+    notes: hyg.block
+      ? hyg.findings[0]?.text ?? "Canvas hygiene failed."
+      : !trustedBody
+        ? "Body filled the frame — print zone kept, mark sized from the zone."
+        : markClass === "cable"
+          ? "Disc route — mark sits on the round face only."
+          : markClass === "notebook"
+            ? "Cover band — clasp, strap and ribs left clear."
+            : markClass === "bottle"
+              ? "Mid-body print face — not the neck, not a specular."
+              : markClass === "pen"
+                ? "Barrel band — readable, high contrast."
+                : markClass === "bag"
+                  ? "Front panel — smaller than a half-body lock."
+                  : wrap === "cylinder"
+                    ? "Local lock — curved wall from side falloff. Existing marks ignored."
+                    : "Local lock — silhouette vs backdrop. Existing marks ignored.",
   };
 }

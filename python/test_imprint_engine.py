@@ -59,7 +59,7 @@ class ZoneAndCropTests(unittest.TestCase):
         zone = m.zone_for_class(rect(body["x"], body["y"], body["w"], body["h"]), "notebook")
         zb = m.box_of(zone)
         self.assertLess(zb["h"], body["h"] * 0.28)
-        self.assertGreater(zb["y"], body["y"] + body["h"] * 0.4)
+        self.assertLessEqual(zb["w"], body["w"] * 0.75)
 
     def test_cable_disc_square(self):
         body = rect(0.2, 0.2, 0.6, 0.6)
@@ -134,6 +134,59 @@ class DualFramingTests(unittest.TestCase):
         canvas = paint(200, 200, 20, 40, 160, 120, 50, 70, 100, 50)
         self.assertIsNotNone(catalog)
         self.assertIsNotNone(canvas)
+
+
+class PlacementRootTests(unittest.TestCase):
+    def _paint(self, W, H, fill, fn):
+        lum = [float(fill)] * (W * H)
+        mask = [0] * (W * H)
+        fn(lum, mask, W, H)
+        return lum, mask
+
+    def test_notebook_off_strap(self):
+        W, H = 80, 100
+        body = {"x": 0.15, "y": 0.08, "w": 0.7, "h": 0.84}
+
+        def fn(L, M, w, h):
+            for y in range(round(body["y"] * h), round((body["y"] + body["h"]) * h)):
+                for x in range(round(body["x"] * w), round((body["x"] + body["w"]) * w)):
+                    M[y * w + x] = 1
+                    L[y * w + x] = 70
+            for y in range(round((body["y"] + body["h"] * 0.48) * h), round((body["y"] + body["h"] * 0.56) * h)):
+                for x in range(round(body["x"] * w), round((body["x"] + body["w"]) * w)):
+                    L[y * w + x] = 30
+            cx0 = round((body["x"] + body["w"] * 0.72) * w)
+            cy0 = round((body["y"] + body["h"] * 0.44) * h)
+            for y in range(cy0, cy0 + 10):
+                for x in range(cx0, cx0 + 10):
+                    L[y * w + x] = 200
+
+        lum, mask = self._paint(W, H, 20, fn)
+        rec = m.recommend_placement("notebook", rect(body["x"], body["y"], body["w"], body["h"]), w=W, h=H, lum=lum, mask=mask)
+        self.assertNotEqual(rec["pick"], "class")
+        zb = m.box_of(rec["winner"]["quad"])
+        strap = {"x": body["x"], "y": body["y"] + body["h"] * 0.48, "w": body["w"], "h": body["h"] * 0.08}
+        self.assertLess(m._overlap(zb, strap), 0.25)
+
+    def test_hygiene_blocks_chrome(self):
+        W = H = 80
+
+        def fn(L, M, w, h):
+            for y in range(18, 62):
+                for x in range(22, 58):
+                    M[y * w + x] = 1
+                    L[y * w + x] = 70
+            for y in range(0, 8):
+                for x in range(4, 76):
+                    L[y * w + x] = 20 if x % 3 == 0 else 240
+            for y in range(70, 78):
+                for x in range(8, 28):
+                    L[y * w + x] = 15
+
+        lum, mask = self._paint(W, H, 210, fn)
+        hyg = m.canvas_hygiene(W, H, lum, mask)
+        self.assertFalse(hyg["ok"])
+        self.assertTrue(hyg["block"])
 
 
 if __name__ == "__main__":
