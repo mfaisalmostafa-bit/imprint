@@ -130,11 +130,12 @@ export function inspectPlacement(opts: {
   zoneWidth?: number;
   catalogQuad?: Quad;
   category?: string;
+  name?: string;
   sku?: string;
   id?: string;
 }): QcFlag[] {
   const flags: QcFlag[] = [];
-  const cls = markClassOf({ id: opts.id, sku: opts.sku, category: opts.category });
+  const cls = markClassOf({ category: opts.category, name: opts.name });
   const spec = classScale(cls);
   if (!opts.allowed.includes(opts.method)) {
     flags.push({

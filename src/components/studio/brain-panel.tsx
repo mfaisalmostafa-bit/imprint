@@ -88,6 +88,7 @@ export function BrainPanel({ onScan }: { onScan: () => void }) {
       invert,
       catalogQuad: mockup.id !== "custom" && "quad" in mockup ? mockup.quad : undefined,
       category: "category" in mockup ? String(mockup.category) : "",
+      name: "name" in mockup ? String(mockup.name) : "",
       sku,
       id: mockup.id,
     }),

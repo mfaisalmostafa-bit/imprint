@@ -84,23 +84,18 @@ const HERO: AngleGuide = {
 
 export function angleGuideFor(input: { id?: string; category?: string }): AngleGuide {
   const id = input.id ?? "";
-  const cat = input.category ?? "";
-  if (id === "pen") return BARREL;
-  if (id === "th164" || id === "flask") return MUG;
-  if (id === "bp70" || id === "bag" || id === "tote") return PACK;
-  if (id === "nb146" || id === "notebook") return COVER;
-  if (id === "p202" || id === "usb" || id === "powerbank" || id === "lr-cbl01") return TECH;
+  const cat = (input.category ?? "").toLowerCase();
+  // House template ids are category aliases (the 17 studio shapes), never catalogue SKUs.
+  if (cat === "writing" || id === "pen") return BARREL;
+  if (cat === "drinkware" || id === "flask" || id === "mug" || id === "cup") return MUG;
+  if (cat === "packaging" || id === "bag" || id === "tote" || id === "box") return PACK;
+  if (cat === "stationery" || id === "notebook") return COVER;
+  if (cat === "tech" || id === "usb" || id === "powerbank") return TECH;
+  if (cat === "apparel") return id === "cap" ? CROWN : CHEST;
   if (id === "cap") return CROWN;
-  if (id === "billboard" || id === "totem") return FACE;
-  if (id === "mug" || id === "cup" || id === "flask") return MUG;
-  if (cat === "Apparel") return CHEST;
-  if (cat === "Drinkware") return MUG;
-  if (cat === "Packaging") return PACK;
-  if (cat === "Stationery") return COVER;
-  if (cat === "Awards") return FRONT;
-  if (cat === "Tech") return TECH;
-  if (cat === "Writing") return BARREL;
-  if (cat === "Display") return FACE;
+  if (cat === "awards" || id === "award") return FRONT;
+  if (cat === "display" || id === "billboard" || id === "totem") return FACE;
+  if (id === "polo" || id === "tshirt" || id === "hoodie") return CHEST;
   return HERO;
 }
 
