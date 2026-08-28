@@ -6,6 +6,13 @@ import {
 } from "./geometry";
 import type { BlendMode, SurfaceTone, WrapMode } from "./mockups";
 import { bodyTrusted } from "./fit-mark";
+import {
+  cropToQuad,
+  discQuad,
+  placeholderRect,
+  zoneForClass,
+  type MarkClass,
+} from "./imprint-engine";
 
 export type DetectResult = {
   accepted: boolean;
@@ -25,6 +32,7 @@ export type DetectResult = {
   bodyWidth: number;
   bodyTrusted: boolean;
   notes: string;
+  markClass?: MarkClass;
 };
 
 export type RgbBuffers = {
@@ -211,7 +219,11 @@ function refused(contrast: number, extra: string): DetectResult {
  * Refuses a lock when the frame is empty / uniform — a false silhouette is worse than none.
  * Existing marks on the product are ignored (holes filled); the plane under them is kept.
  */
-export function detectFromRgb(buf: RgbBuffers, prior?: Quad): DetectResult {
+export function detectFromRgb(
+  buf: RgbBuffers,
+  prior?: Quad,
+  opts?: { markClass?: MarkClass },
+): DetectResult {
   const { w, h, r, g, b } = buf;
   const n = w * h;
   const pad = Math.max(2, Math.round(Math.min(w, h) * 0.06));
@@ -323,7 +335,8 @@ export function detectFromRgb(buf: RgbBuffers, prior?: Quad): DetectResult {
   }
   const medW = median(rowW);
   const bodyWidth = medW / w;
-  const trustedBody = bodyTrusted(bodyWidth) && coverage < 0.88;
+  const markClass = opts?.markClass;
+  const trustedBody = bodyTrusted(bodyWidth, markClass) && coverage < 0.88;
   // Drop stray whiskers, keep a real taper (top can be ~40% of bottom).
   const minW = medW * 0.28;
   for (let y = 0; y < h; y++) {
@@ -424,10 +437,20 @@ export function detectFromRgb(buf: RgbBuffers, prior?: Quad): DetectResult {
   );
 
   let outQuad = quad;
+  if (markClass === "cable") {
+    outQuad = discQuad(quad);
+  } else if (markClass === "tech") {
+    const lum = new Float32Array(n);
+    for (let i = 0; i < n; i++) lum[i] = L[i]!;
+    const ph = placeholderRect({ w, h, lum, mask });
+    outQuad = ph ? cropToQuad(ph) : zoneForClass(quad, markClass);
+  } else if (markClass) {
+    outQuad = zoneForClass(quad, markClass);
+  }
   if (prior && isConvexQuad(prior)) {
-    if (!trustedBody) {
+    if (!trustedBody && !markClass) {
       outQuad = prior;
-    } else {
+    } else if (!markClass) {
       let sx = 0;
       let sy = 0;
       let sw = 0;
@@ -472,10 +495,21 @@ export function detectFromRgb(buf: RgbBuffers, prior?: Quad): DetectResult {
     botWidth,
     bodyWidth,
     bodyTrusted: trustedBody,
+    markClass,
     notes: !trustedBody
       ? "Body filled the frame — print zone kept, mark sized from the zone."
-      : wrap === "cylinder"
-        ? "Local lock — curved wall from side falloff. Existing marks ignored."
-        : "Local lock — silhouette vs backdrop. Existing marks ignored.",
+      : markClass === "cable"
+        ? "Disc route — mark sits on the round face only."
+        : markClass === "notebook"
+          ? "Cover band — clasp and ribs left clear."
+          : markClass === "bottle"
+            ? "Mid-body print face — not the neck."
+            : markClass === "pen"
+              ? "Barrel band — readable, high contrast."
+              : markClass === "bag"
+                ? "Front panel — smaller than a half-body lock."
+                : wrap === "cylinder"
+                  ? "Local lock — curved wall from side falloff. Existing marks ignored."
+                  : "Local lock — silhouette vs backdrop. Existing marks ignored.",
   };
 }

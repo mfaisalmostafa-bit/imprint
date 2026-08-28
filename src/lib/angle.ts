@@ -86,6 +86,10 @@ export function angleGuideFor(input: { id?: string; category?: string }): AngleG
   const id = input.id ?? "";
   const cat = input.category ?? "";
   if (id === "pen") return BARREL;
+  if (id === "th164" || id === "flask") return MUG;
+  if (id === "bp70" || id === "bag" || id === "tote") return PACK;
+  if (id === "nb146" || id === "notebook") return COVER;
+  if (id === "p202" || id === "usb" || id === "powerbank" || id === "lr-cbl01") return TECH;
   if (id === "cap") return CROWN;
   if (id === "billboard" || id === "totem") return FACE;
   if (id === "mug" || id === "cup" || id === "flask") return MUG;

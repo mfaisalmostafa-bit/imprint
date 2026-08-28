@@ -1,12 +1,17 @@
-/** Auto mark size. Body width is a fraction of the photograph, scale is a fraction of the print zone. */
+/** Auto mark size. Scale is a fraction of the print zone, capped per product class. */
 
 import { clamp, quadBBox, type Quad } from "./geometry";
+import {
+  classScale,
+  type MarkClass,
+} from "./imprint-engine";
 
 /** Silhouette filled the frame — cannot separate a dark product from a dark set. */
 export const BODY_HIGH = 0.95;
 export const BODY_LOW = 0.08;
-/** Mark as a fraction of a *trusted* body, in image space. */
-export const MARK_OF_BODY = 0.55;
+/** Default mark-of-body. Real sizing uses classScale(markClass).markOfBody. */
+export const MARK_OF_BODY = 0.38;
+
 /**
  * Their Python cap is 0.70 × body. When body reads 1.0 the cap is 0.70 of the
  * photo, which is larger than every print zone, so it never bites.
@@ -14,8 +19,9 @@ export const MARK_OF_BODY = 0.55;
  */
 export const DEAD_IMAGE_CAP = 0.7;
 
-export function bodyTrusted(bodyWidth: number) {
-  return bodyWidth >= BODY_LOW && bodyWidth < BODY_HIGH;
+export function bodyTrusted(bodyWidth: number, markClass?: MarkClass | null) {
+  const spec = classScale(markClass);
+  return bodyWidth >= spec.bodyLow && bodyWidth < spec.bodyHigh;
 }
 
 export type FitMark = {
@@ -30,15 +36,17 @@ export function fitMarkScale(opts: {
   zoneWidth: number;
   maxScale: number;
   preferred: number;
+  markClass?: MarkClass | null;
 }): FitMark {
-  const maxScale = Math.max(0.15, opts.maxScale);
-  const preferred = clamp(opts.preferred, 0.15, maxScale);
+  const spec = classScale(opts.markClass);
+  const maxScale = Math.max(spec.minScale, Math.min(opts.maxScale, spec.maxScale));
   const zoneW = Math.max(0.04, opts.zoneWidth);
-  const trusted = bodyTrusted(opts.bodyWidth);
+  const trusted = bodyTrusted(opts.bodyWidth, opts.markClass);
 
   if (!trusted) {
     const cap = maxScale;
-    const scale = Math.min(preferred, cap);
+    const lo = Math.min(spec.minScale, cap);
+    const scale = clamp(opts.preferred, lo, cap);
     return {
       scale,
       trusted: false,
@@ -47,13 +55,15 @@ export function fitMarkScale(opts: {
     };
   }
 
-  const fromBody = (MARK_OF_BODY * opts.bodyWidth) / zoneW;
+  const fromBody = (spec.markOfBody * opts.bodyWidth) / zoneW;
   const cap = Math.min(maxScale, fromBody);
+  const lo = Math.min(spec.minScale, cap);
+  const preferred = clamp(opts.preferred, lo, maxScale);
   return {
-    scale: clamp(Math.min(preferred, cap), 0.15, maxScale),
+    scale: clamp(Math.min(preferred, cap), lo, cap),
     trusted: true,
     cap,
-    note: "Mark capped to the product body.",
+    note: `${spec.badge} — mark capped to the product body.`,
   };
 }
 

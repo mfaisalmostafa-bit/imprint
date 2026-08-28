@@ -26,6 +26,7 @@ import type { JobKind } from "./cc";
 import { recallPlacement, rememberPlacement } from "./placement-memory";
 import { fitMarkScale, zoneForFit } from "./fit-mark";
 import { judgeCatalogAngle } from "./angle";
+import { classScale, markClassOf } from "./imprint-engine";
 
 export type LogoAsset = {
   id: string;
@@ -48,6 +49,7 @@ type Snapshot = {
   quad: Quad;
   scale: number;
   scaleCap: number;
+  scaleMin: number;
   offsetX: number;
   offsetY: number;
   opacity: number;
@@ -75,6 +77,7 @@ type StudioState = {
   quad: Quad;
   scale: number;
   scaleCap: number;
+  scaleMin: number;
   offsetX: number;
   offsetY: number;
   opacity: number;
@@ -187,6 +190,7 @@ function takeSnapshot(s: StudioState): Snapshot {
     quad: cloneQuad(s.quad),
     scale: s.scale,
     scaleCap: s.scaleCap,
+    scaleMin: s.scaleMin,
     offsetX: s.offsetX,
     offsetY: s.offsetY,
     opacity: s.opacity,
@@ -213,6 +217,14 @@ function apparelOffset(id: string): number {
   return 0;
 }
 
+function classBounds(m: { id?: string; sku?: string; category?: string; name?: string; maxScale?: number }) {
+  const spec = classScale(markClassOf(m));
+  return {
+    scaleMin: spec.minScale,
+    scaleCap: Math.min(m.maxScale ?? spec.maxScale, spec.maxScale),
+  };
+}
+
 function bodyWidthOf(result: ScanResult | DetectResult, quad: Quad) {
   if ("bodyWidth" in result && typeof result.bodyWidth === "number") return result.bodyWidth;
   if ("topWidth" in result && "botWidth" in result) {
@@ -235,14 +247,15 @@ export const useStudio = create<StudioState>((set, get) => ({
   customQuad: defaultCenterQuad(),
   quad: cloneQuad(first.quad),
   scale: first.scale,
-  scaleCap: first.maxScale,
+  scaleCap: classBounds(first).scaleCap,
+  scaleMin: classBounds(first).scaleMin,
   offsetX: 0,
   offsetY: apparelOffset(first.id),
   opacity: 0.92,
   blend: first.blend,
   wrap: first.wrap,
   cylinderArc: first.cylinderArc,
-  lighting: 0.55,
+  lighting: first.invert ? 0.32 : 0.55,
   invert: first.invert,
   method: first.defaultMethod,
   treatment: "auto",
@@ -306,6 +319,7 @@ export const useStudio = create<StudioState>((set, get) => ({
     if (!m) return;
     const prev = get();
     const mem = recallPlacement(m.sku);
+    const bounds = classBounds(m);
     set({
       mockupId: m.id,
       customQuad: prev.mockupId === "custom" ? cloneQuad(prev.quad) : prev.customQuad,
@@ -318,12 +332,13 @@ export const useStudio = create<StudioState>((set, get) => ({
       surfaceLabel: m.surface,
       material: m.material,
       confidence: 1,
-      brainNote: mem ? "Placement recalled for this SKU." : "Catalog plane — corners and the mark are live.",
+      brainNote: mem ? "Placement recalled for this SKU." : `${classScale(markClassOf(m)).badge} — catalog plane.`,
       scanError: null,
       offsetX: mem?.offsetX ?? 0,
       offsetY: mem?.offsetY ?? apparelOffset(m.id),
       scale: mem?.scale ?? m.scale,
-      scaleCap: m.maxScale,
+      scaleCap: bounds.scaleCap,
+      scaleMin: bounds.scaleMin,
       method: m.defaultMethod,
       mode: "studio",
     });
@@ -360,6 +375,7 @@ export const useStudio = create<StudioState>((set, get) => ({
       scanError: null,
       scale: 0.7,
       scaleCap: 0.6,
+      scaleMin: classScale("default").minScale,
       offsetX: 0,
       offsetY: 0,
       mode: "studio",
@@ -372,8 +388,8 @@ export const useStudio = create<StudioState>((set, get) => ({
     }),
   setQuad: (quad) => set({ quad }),
   setScale: (n) => {
-    const cap = get().scaleCap;
-    set({ scale: clamp(n, 0.15, cap) });
+    const s = get();
+    set({ scale: clamp(n, s.scaleMin, s.scaleCap) });
   },
   setOffset: (x, y) => set({ offsetX: x, offsetY: y }),
   setOpacity: (n) => set({ opacity: n }),
@@ -391,12 +407,14 @@ export const useStudio = create<StudioState>((set, get) => ({
         quad: defaultCenterQuad(),
         scale: 0.7,
         scaleCap: 0.6,
+        scaleMin: classScale("default").minScale,
         offsetX: 0,
         offsetY: 0,
       });
       return;
     }
     const m = MOCKUPS.find((x) => x.id === s.mockupId) ?? first;
+    const bounds = classBounds(m);
     set({
       quad: cloneQuad(m.quad),
       blend: m.blend,
@@ -404,7 +422,8 @@ export const useStudio = create<StudioState>((set, get) => ({
       cylinderArc: m.cylinderArc,
       invert: m.invert,
       scale: m.scale,
-      scaleCap: m.maxScale,
+      scaleCap: bounds.scaleCap,
+      scaleMin: bounds.scaleMin,
       method: m.defaultMethod,
       offsetX: 0,
       offsetY: apparelOffset(m.id),
@@ -413,10 +432,12 @@ export const useStudio = create<StudioState>((set, get) => ({
   applyScan: (result) =>
     set((s) => {
       const mock = s.mockup();
-      const maxScale = "maxScale" in mock ? mock.maxScale : 0.9;
+      const cls = markClassOf(mock);
+      const spec = classScale(cls);
+      const maxScale = Math.min("maxScale" in mock ? mock.maxScale : spec.maxScale, spec.maxScale);
       const preferred = "scale" in mock && s.mockupId !== "custom" ? mock.scale : s.scale;
       const detected = result.quad;
-      const trusted = "bodyTrusted" in result ? result.bodyTrusted : quadBBox(detected).w < 0.95;
+      const trusted = "bodyTrusted" in result ? result.bodyTrusted : quadBBox(detected).w < spec.bodyHigh;
       const catalog = s.mockupId !== "custom" && "quad" in mock ? mock.quad : null;
       const keepUntrusted = Boolean(catalog && !trusted);
       let quad = keepUntrusted ? s.quad : zoneForFit(detected, trusted);
@@ -438,6 +459,7 @@ export const useStudio = create<StudioState>((set, get) => ({
         zoneWidth: quadBBox(quad).w,
         maxScale,
         preferred,
+        markClass: cls,
       });
       return {
         quad,
@@ -445,7 +467,11 @@ export const useStudio = create<StudioState>((set, get) => ({
         wrap: result.wrap,
         cylinderArc: "cylinderArc" in result && result.cylinderArc ? result.cylinderArc : s.cylinderArc,
         blend: result.suggestedBlend,
-        invert: result.surfaceTone === "dark" || ("invert" in result && result.invert),
+        invert: mock.id === "custom"
+          ? result.surfaceTone === "dark" || ("invert" in result && result.invert)
+          : "invert" in mock
+            ? mock.invert
+            : result.surfaceTone === "dark",
         lighting: result.surfaceTone === "dark" ? 0.32 : 0.55,
         surfaceLabel: "surface" in result ? result.surface : s.surfaceLabel,
         material: "material" in result ? result.material : s.material,
@@ -455,6 +481,7 @@ export const useStudio = create<StudioState>((set, get) => ({
         scanError: null,
         scale: keepCatalog ? preferred : fit.scale,
         scaleCap: maxScale,
+        scaleMin: spec.minScale,
       };
     }),
   setScanning: (v) => set({ scanning: v, scanError: v ? null : get().scanError }),

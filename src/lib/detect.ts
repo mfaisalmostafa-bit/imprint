@@ -2,6 +2,7 @@ import { loadImage } from "./image";
 import { detectFromRgb, type DetectResult } from "./detect-core";
 import type { BlendMode, SurfaceTone } from "./mockups";
 import type { Quad } from "./geometry";
+import type { MarkClass } from "./imprint-engine";
 
 export type { DetectResult } from "./detect-core";
 export { detectFromRgb } from "./detect-core";
@@ -10,7 +11,11 @@ export { detectFromRgb } from "./detect-core";
  * Client-side printable-plane lock. No API.
  * Contrast against the backdrop; refuses empty frames; no centre-weight clip.
  */
-export async function detectSurface(src: string, prior?: Quad): Promise<DetectResult> {
+export async function detectSurface(
+  src: string,
+  prior?: Quad,
+  markClass?: MarkClass,
+): Promise<DetectResult> {
   const img = await loadImage(src);
   const nw = img.naturalWidth || img.width;
   const nh = img.naturalHeight || img.height;
@@ -34,7 +39,7 @@ export async function detectSurface(src: string, prior?: Quad): Promise<DetectRe
     g[p] = data[i + 1]!;
     b[p] = data[i + 2]!;
   }
-  return detectFromRgb({ w, h, r, g, b }, prior);
+  return detectFromRgb({ w, h, r, g, b }, prior, markClass ? { markClass } : undefined);
 }
 
 function lumAt(data: Uint8ClampedArray, i: number) {

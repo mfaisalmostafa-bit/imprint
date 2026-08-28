@@ -4,6 +4,7 @@ import type { Quad } from "./geometry";
 import { poseFromQuad, quadArea } from "./geometry";
 import { logoDpi } from "./mark-size";
 import { markBodyRatio } from "./fit-mark";
+import { classScale, markClassOf } from "./imprint-engine";
 import { judgeCatalogAngle, judgePoseRoll } from "./angle";
 
 export type QcFlag = {
@@ -128,8 +129,13 @@ export function inspectPlacement(opts: {
   bodyWidth?: number;
   zoneWidth?: number;
   catalogQuad?: Quad;
+  category?: string;
+  sku?: string;
+  id?: string;
 }): QcFlag[] {
   const flags: QcFlag[] = [];
+  const cls = markClassOf({ id: opts.id, sku: opts.sku, category: opts.category });
+  const spec = classScale(cls);
   if (!opts.allowed.includes(opts.method)) {
     flags.push({
       level: "block",
@@ -147,8 +153,8 @@ export function inspectPlacement(opts: {
   if (
     opts.bodyWidth !== undefined &&
     opts.zoneWidth !== undefined &&
-    opts.bodyWidth < 0.95 &&
-    opts.bodyWidth >= 0.08
+    opts.bodyWidth < spec.bodyHigh &&
+    opts.bodyWidth >= spec.bodyLow
   ) {
     const ratio = markBodyRatio(opts.scale, opts.zoneWidth, opts.bodyWidth);
     if (ratio > 1) {
@@ -156,6 +162,12 @@ export function inspectPlacement(opts: {
         level: "block",
         code: "oversize",
         text: `Mark is ${ratio.toFixed(2)}× the product body. Size from the print zone.`,
+      });
+    } else if (ratio > spec.markOfBody * 1.25) {
+      flags.push({
+        level: "warn",
+        code: "oversize",
+        text: `Mark is large for the ${spec.zone} (${Math.round(ratio * 100)}% of body). ${spec.badge}.`,
       });
     }
   }
@@ -192,11 +204,11 @@ export function inspectPlacement(opts: {
       });
     }
   }
-  if (opts.productTone === "dark" && !opts.invert && METHODS[opts.method].ink) {
+  if (opts.productTone === "dark" && !opts.invert) {
     flags.push({
       level: "warn",
       code: "contrast",
-      text: "Dark product + dark ink. Invert or switch to a light spot colour.",
+      text: "Dark product needs a light mark. Invert for laser etch or use a light spot colour.",
     });
   }
   if (opts.productTone === "light" && opts.invert && METHODS[opts.method].ink) {

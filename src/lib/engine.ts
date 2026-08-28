@@ -16,7 +16,7 @@ export type OverrideDoc = {
 };
 
 export const SAVE_PHRASE = "SAVE PLACEMENT OVERRIDE";
-export const SKU_RE = /^TPX-[A-Z]{3}-\d{2}$/;
+export const SKU_RE = /^(TPX-[A-Z]{3}-\d{2}|[A-Z]{1,4}-?[A-Z]*\d[A-Z0-9]{0,8})$/;
 
 export function quadToEngine(q: Quad): EngineQuad {
   return [
