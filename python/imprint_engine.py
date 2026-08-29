@@ -53,6 +53,7 @@ Wire-up
 
 from __future__ import annotations
 
+import math
 import re
 from typing import Any, Mapping, Sequence
 
@@ -237,9 +238,24 @@ _BOTTLE_NAME = re.compile(r"\b(bottle|flask|tumbler|mug|cup|thermos|drinkware)\b
 _BAG_NAME = re.compile(r"\b(backpack|rucksack|tote|bag|bags)\b", re.I)
 _NOTE_NAME = re.compile(r"\b(notebook|journal|diary|stationery)\b", re.I)
 _APPAREL_NAME = re.compile(r"\b(polo|t-?shirt|hoodie|cap|apparel|textile)\b", re.I)
-_AWARD_NAME = re.compile(r"\b(award|trophy|plaque)\b", re.I)
+_AWARD_NAME = re.compile(r"\b(award|trophy|plaque|key ?tag|keychain)\b", re.I)
 _DISPLAY_NAME = re.compile(r"\b(billboard|totem|signage|display)\b", re.I)
-_TECH_NAME = re.compile(r"\b(power ?bank|usb|electronics)\b", re.I)
+_TECH_NAME = re.compile(r"\b(power ?bank|usb|electronics|key ?tag|keychain)\b", re.I)
+
+# Expected print-face aspect (width / height) from the class recipe — dimensionless,
+# so catalogue photos and the 1400 canvas share the same number.
+_EXPECTED_ASPECT = {
+    "pen": 2.40,
+    "bottle": 0.94,
+    "bag": 1.43,
+    "cable": 1.00,
+    "notebook": 3.12,
+    "apparel": 1.38,
+    "tech": 1.56,
+    "award": 1.25,
+    "display": 1.25,
+    "default": 1.25,
+}
 
 
 def _clamp(v: float, lo: float, hi: float) -> float:
@@ -917,7 +933,12 @@ def recommend_placement(cls: str, body: Quad, **kwargs: Any) -> dict[str, Any]:
     picked = pick_zone(cls, body, **kwargs)
     by_id = {c["id"]: c for c in picked["candidates"]}
     pick = next((k for k in ("demo", "panel", "class") if k in by_id and not by_id[k]["veto"]), "class")
-    return {"pick": pick, "choices": picked["candidates"], "winner": picked["winner"], "maps": picked["maps"]}
+    sheet = face_candidates(cls, body, **kwargs) if kwargs else None
+    out: dict[str, Any] = {"pick": pick, "choices": picked["candidates"], "winner": picked["winner"], "maps": picked["maps"]}
+    if sheet:
+        out["sheet"] = sheet["sheet"]
+        out["sheetWinner"] = sheet["winner"]
+    return out
 
 
 def canvas_hygiene(w: int, h: int, lum: Sequence[float], mask: Sequence[int]) -> dict[str, Any]:
@@ -994,3 +1015,438 @@ def assert_zone(cls: str, body: Quad) -> bool:
         return zb["h"] <= b["h"] * 0.28 and zb["w"] <= b["w"] * 0.75 and zb["w"] >= b["w"] * 0.2
     cx = zb["x"] + zb["w"] / 2
     return zb["w"] > 0.02 and zb["h"] > 0.02 and b["x"] < cx < b["x"] + b["w"]
+
+
+# ---------------------------------------------------------------------------
+# Candidate quality scoring — pick sheet (face_candidates → _pickable)
+#
+# The live filter was three hard rules:
+#   1. centre + majority-area on the body mask
+#   2. reject minor-axis < 0.05 of body with elongation > 4
+#   3. upright any quad whose *long-axis* angle exceeds 50°
+#      (renderer maps the logo top onto TL→TR, so long-axis = mark rotation.
+#       Never score the top edge — a 75° sliver reads ~18° there.)
+#
+# Those stay as geometry (1–2 still reject; 3 is a transform, not a reject).
+# Quality is now a ranked score:
+#   − glare (specular cells overlapping the box)   capped so a 37° print
+#     band on a metal bottle stays offered + fitted
+#   − dimension-line / chrome (white strokes, thickness scaled to the frame
+#     so 1–5 px on a packed catalogue photo ≡ the same fraction on 1400)
+#   − off-body area
+#   − extreme aspect vs the class recipe
+#   + panel / plate / demo agreement
+#
+# Point seam: {x, y} dicts at the API boundary, [x, y] pairs internally.
+# ---------------------------------------------------------------------------
+
+OFFER_FLOOR = 25.0
+GLARE_PENALTY_CAP = 28.0
+UPRIGHT_DEG = 50.0
+SLIVER_MINOR = 0.05
+SLIVER_ELONG = 4.0
+# Overlap with the glare map that means "this box IS the silver band",
+# not a stain sitting on a print face. Production waived glare in that case
+# so a 37° drinkware band is confirmation, not a defect.
+SPECULAR_ROUTE = 0.55
+AUTO_LOCK_TOP = 90.0
+AUTO_LOCK_RUNNER = 50.0
+
+
+def expected_aspect(cls: str | None = None) -> float:
+    return float(_EXPECTED_ASPECT.get(cls or "default", 1.25))
+
+
+def _xy(p: Any) -> list[float]:
+    if isinstance(p, Mapping):
+        return [float(p["x"]), float(p["y"])]
+    return [float(p[0]), float(p[1])]
+
+
+def _pt(p: Sequence[float]) -> dict[str, float]:
+    return {"x": float(p[0]), "y": float(p[1])}
+
+
+def _quad_xy(q: Sequence[Any]) -> list[list[float]]:
+    return [_xy(p) for p in q]
+
+
+def _quad_pts(q: Sequence[Sequence[float]]) -> list[dict[str, float]]:
+    return [_pt(p) for p in q]
+
+
+def _seg_len(a: Sequence[float], b: Sequence[float]) -> float:
+    return math.hypot(b[0] - a[0], b[1] - a[1])
+
+
+def _seg_ang(a: Sequence[float], b: Sequence[float]) -> float:
+    """Unsigned angle of a segment from horizontal, folded to 0–90."""
+    deg = abs(math.degrees(math.atan2(b[1] - a[1], b[0] - a[0])))
+    if deg > 90:
+        deg = 180 - deg
+    return deg
+
+
+def long_axis_angle(quad: Sequence[Any]) -> float:
+    """Angle of the *longer* edge, not the presented top edge."""
+    q = _quad_xy(quad)
+    if len(q) < 4:
+        return 0.0
+    d01 = _seg_len(q[0], q[1])
+    d12 = _seg_len(q[1], q[2])
+    if d01 >= d12:
+        return _seg_ang(q[0], q[1])
+    return _seg_ang(q[1], q[2])
+
+
+def _axes(quad: Sequence[Any]) -> tuple[float, float]:
+    q = _quad_xy(quad)
+    d01 = _seg_len(q[0], q[1])
+    d12 = _seg_len(q[1], q[2])
+    major = max(d01, d12)
+    minor = min(d01, d12)
+    return major, minor
+
+
+def upright_quad(quad: Sequence[Any]) -> list[Point]:
+    """Cycle vertices so TL→TR is the long axis. Not a reject."""
+    q = _quad_xy(quad)
+    if len(q) < 4:
+        return _quad_pts(q)
+    d01 = _seg_len(q[0], q[1])
+    d12 = _seg_len(q[1], q[2])
+    if d12 > d01:
+        q = [q[1], q[2], q[3], q[0]]
+    if q[1][0] + q[1][1] * 0.01 < q[0][0] + q[0][1] * 0.01 and _seg_len(q[0], q[1]) >= _seg_len(q[1], q[2]):
+        q = [q[1], q[0], q[3], q[2]]
+    ang = long_axis_angle(q)
+    if ang > UPRIGHT_DEG and _seg_len(q[1], q[2]) > _seg_len(q[0], q[1]) * 0.98:
+        q = [q[1], q[2], q[3], q[0]]
+    return _quad_pts(q)
+
+
+def _sample_mask(quad: Sequence[Any], w: int, h: int, mask: Sequence[int], n: int = 8) -> tuple[float, bool]:
+    q = _quad_xy(upright_quad(quad))
+    on = 0
+    tot = 0
+    for j in range(n):
+        v = (j + 0.5) / n
+        for i in range(n):
+            u = (i + 0.5) / n
+            a = (1 - u) * (1 - v)
+            b = u * (1 - v)
+            c = u * v
+            d = (1 - u) * v
+            x = a * q[0][0] + b * q[1][0] + c * q[2][0] + d * q[3][0]
+            y = a * q[0][1] + b * q[1][1] + c * q[2][1] + d * q[3][1]
+            ix = int(x * w)
+            iy = int(y * h)
+            tot += 1
+            if 0 <= ix < w and 0 <= iy < h and mask[iy * w + ix]:
+                on += 1
+    frac = on / max(1, tot)
+    cx = sum(p[0] for p in q) / 4
+    cy = sum(p[1] for p in q) / 4
+    ix, iy = int(cx * w), int(cy * h)
+    centre = 0 <= ix < w and 0 <= iy < h and bool(mask[iy * w + ix])
+    return frac, centre
+
+
+def _chrome_frac(box: Box, w: int, h: int, lum: Sequence[float]) -> float:
+    """White 1–5 px strokes, thickness scaled to the frame (dual-framing)."""
+    min_px = max(1, round(min(w, h) * 0.0025))
+    max_px = max(5, round(min(w, h) * 0.0125))
+    x0 = max(0, int(box["x"] * w))
+    y0 = max(0, int(box["y"] * h))
+    x1 = min(w, int((box["x"] + box["w"]) * w) + 1)
+    y1 = min(h, int((box["y"] + box["h"]) * h) + 1)
+    if x1 <= x0 or y1 <= y0:
+        return 0.0
+    hits = 0
+    n = 0
+
+    def consume_run(run: int) -> None:
+        nonlocal hits
+        if min_px <= run <= max_px:
+            hits += run
+
+    for y in range(y0, y1):
+        run = 0
+        row = y * w
+        for x in range(x0, x1):
+            n += 1
+            if lum[row + x] >= 220:
+                run += 1
+            else:
+                consume_run(run)
+                run = 0
+        consume_run(run)
+    for x in range(x0, x1):
+        run = 0
+        for y in range(y0, y1):
+            if lum[y * w + x] >= 220:
+                run += 1
+            else:
+                consume_run(run)
+                run = 0
+        consume_run(run)
+    return hits / max(1, n * 2)
+
+
+def _glare_frac(box: Box, specular: Sequence[Box] | None) -> float:
+    if not specular:
+        return 0.0
+    return max((_overlap(box, s) for s in specular), default=0.0)
+
+
+def _hardware_frac(box: Box, maps: Mapping[str, Any] | None) -> float:
+    if not maps:
+        return 0.0
+    best = 0.0
+    for key in ("strap", "clasp", "ribs"):
+        o = maps.get(key)
+        if o:
+            best = max(best, _overlap(box, o))
+    return best
+
+
+def _panel_agree(box: Box, maps: Mapping[str, Any] | None) -> float:
+    if not maps:
+        return 0.0
+    best = 0.0
+    for key in ("panel", "demo"):
+        o = maps.get(key)
+        if o:
+            best = max(best, _overlap(box, o))
+    return best
+
+
+def _fit_face(box: Box, cls: str, body: Box) -> Box:
+    prior = box_of(zone_for_class(crop_to_quad(body), cls))
+    tw = min(box["w"] * 0.95, max(box["w"] * 0.35, prior["w"]))
+    th = min(box["h"] * 0.95, max(box["h"] * 0.35, prior["h"]))
+    tw = min(tw, box["w"])
+    th = min(th, box["h"])
+    return {
+        "x": _clamp(box["x"] + box["w"] / 2 - tw / 2, box["x"], box["x"] + box["w"] - tw),
+        "y": _clamp(box["y"] + box["h"] / 2 - th / 2, box["y"], box["y"] + box["h"] - th),
+        "w": tw,
+        "h": th,
+    }
+
+
+def score_candidate(
+    quad: Sequence[Any],
+    cls: str,
+    body: Sequence[Any],
+    *,
+    w: int | None = None,
+    h: int | None = None,
+    lum: Sequence[float] | None = None,
+    mask: Sequence[int] | None = None,
+    maps: Mapping[str, Any] | None = None,
+    route: str | None = None,
+) -> dict[str, Any]:
+    """Ranked quality. Returns {x,y} quads. Internals are [x,y]."""
+    upright = upright_quad(quad)
+    box = box_of(upright)
+    if isinstance(body, Mapping) and "w" in body:
+        body_box = {
+            "x": float(body["x"]),
+            "y": float(body["y"]),
+            "w": float(body["w"]),
+            "h": float(body["h"]),
+        }
+    else:
+        body_box = box_of(_quad_pts(_quad_xy(body)))
+
+    major, minor = _axes(upright)
+    body_span = max(body_box["w"], body_box["h"], 1e-6)
+    minor_of_body = minor / body_span
+    elong = major / max(1e-6, minor)
+    aspect = box["w"] / max(1e-6, box["h"])
+    expected = expected_aspect(cls)
+    aspect_ratio = max(aspect, expected) / max(1e-6, min(aspect, expected))
+    angle = long_axis_angle(upright)
+
+    on_body = 1.0
+    centre = True
+    if w and h and mask is not None:
+        on_body, centre = _sample_mask(upright, w, h, mask)
+    off_body = max(0.0, 1.0 - on_body)
+
+    glare = _glare_frac(box, (maps or {}).get("specular") if maps else None)
+    chrome = _chrome_frac(box, w, h, lum) if w and h and lum is not None else 0.0
+    hardware = _hardware_frac(box, maps)
+    panel = _panel_agree(box, maps)
+    specular_route = bool(route == "specular" or glare >= SPECULAR_ROUTE)
+
+    reasons: list[str] = []
+    score = 100.0
+    if specular_route:
+        glare_pen = 0.0
+        reasons.append("glare waived — candidate is the specular route")
+    else:
+        glare_pen = min(GLARE_PENALTY_CAP, glare * 48)
+        if glare_pen:
+            score -= glare_pen
+            reasons.append(f"glare {glare:.2f} −{glare_pen:.1f}")
+    chrome_pen = min(32.0, chrome * 90)
+    if chrome_pen:
+        score -= chrome_pen
+        reasons.append(f"chrome {chrome:.2f} −{chrome_pen:.1f}")
+    off_pen = min(40.0, off_body * 70)
+    if off_pen:
+        score -= off_pen
+        reasons.append(f"off-body {off_body:.2f} −{off_pen:.1f}")
+    if aspect_ratio > 1.4:
+        asp_pen = min(22.0, (aspect_ratio - 1.4) * 12)
+        score -= asp_pen
+        reasons.append(f"aspect {aspect:.2f} vs {expected:.2f} −{asp_pen:.1f}")
+    hw_pen = min(26.0, hardware * 50)
+    if hw_pen:
+        score -= hw_pen
+        reasons.append(f"hardware {hardware:.2f} −{hw_pen:.1f}")
+    if panel > 0.35:
+        bonus = 18.0 if panel > 0.55 else 12.0
+        score += bonus
+        reasons.append(f"panel +{bonus:.0f}")
+
+    score = _clamp(score, 0.0, 100.0)
+
+    veto: str | None = None
+    if not centre:
+        veto = "off-body-centre"
+    elif on_body < 0.5:
+        veto = "off-body-area"
+    elif minor_of_body < SLIVER_MINOR and elong > SLIVER_ELONG:
+        veto = "sliver"
+
+    offered = veto is None and score >= OFFER_FLOOR
+    fitted_box = _fit_face(box, cls, body_box) if offered else box
+    fitted = offered and fitted_box["w"] > 0.03 and fitted_box["h"] > 0.03
+
+    return {
+        "quad": upright,
+        "fittedQuad": crop_to_quad(fitted_box),
+        "score": score,
+        "offered": offered,
+        "fitted": fitted,
+        "veto": veto,
+        "reasons": reasons,
+        "metrics": {
+            "angle": angle,
+            "aspect": aspect,
+            "expectedAspect": expected,
+            "elong": elong,
+            "minorOfBody": minor_of_body,
+            "onBody": on_body,
+            "centre": centre,
+            "glare": glare,
+            "chrome": chrome,
+            "hardware": hardware,
+            "panel": panel,
+            "offBody": off_body,
+            "specularRoute": specular_route,
+            "glarePen": glare_pen,
+        },
+    }
+
+
+def _pickable(scored: Mapping[str, Any]) -> bool:
+    """Offered + fitted. Replaces the old pass/fail gate."""
+    return bool(scored.get("offered") and scored.get("fitted") and not scored.get("veto"))
+
+
+def face_candidates(
+    cls: str,
+    body: Sequence[Any],
+    *,
+    w: int | None = None,
+    h: int | None = None,
+    lum: Sequence[float] | None = None,
+    mask: Sequence[int] | None = None,
+    extras: Sequence[Any] | None = None,
+) -> dict[str, Any]:
+    """Ranked pick sheet. API quads are [{x,y}, ...]."""
+    if isinstance(body, Mapping) and "w" in body:
+        body_pts = crop_to_quad(body)  # type: ignore[arg-type]
+    else:
+        body_pts = _quad_pts(_quad_xy(body))
+    body_box = box_of(body_pts)
+    maps: dict[str, Any] = {"strap": None, "clasp": None, "ribs": None, "specular": [], "demo": None, "panel": None}
+    if w and h and lum is not None and mask is not None:
+        maps = read_surface(w, h, lum, mask, body_box)
+        ph = placeholder_rect(w, h, lum, mask) if cls in ("tech", "default", "award") else None
+        if ph and not maps["panel"]:
+            maps["panel"] = ph
+        if maps["panel"]:
+            maps["panel"] = _fit_in_panel(maps["panel"], cls, body_box)
+
+    raw: list[tuple[str, str, list[Point], str | None]] = []
+    if maps.get("demo"):
+        raw.append(("demo", "where the demo print already is", crop_to_quad(maps["demo"]), None))
+    if maps.get("panel"):
+        raw.append(("panel", "the flat panel", crop_to_quad(maps["panel"]), None))
+    if cls == "cable":
+        raw.append(("hub", "the disc / hub", disc_quad(body_pts), None))
+    raw.append(("class", "the usual place for this category", zone_for_class(body_pts, cls), None))
+    if extras:
+        for i, item in enumerate(extras):
+            if isinstance(item, Mapping) and "quad" in item:
+                q = _quad_pts(_quad_xy(item["quad"]))  # type: ignore[arg-type]
+                kind = str(item.get("id") or f"extra-{i}")
+                label = str(item.get("label") or "detected face")
+                route = item.get("route")
+            else:
+                q = _quad_pts(_quad_xy(item))  # type: ignore[arg-type]
+                kind, label, route = f"extra-{i}", "detected face", None
+            raw.append((kind, label, q, route if isinstance(route, str) else None))
+
+    sheet: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for kind, label, q, route in raw:
+        key = f"{round(box_of(q)['x'], 3)}:{round(box_of(q)['y'], 3)}:{round(box_of(q)['w'], 3)}"
+        if key in seen:
+            continue
+        seen.add(key)
+        scored = score_candidate(q, cls, body_pts, w=w, h=h, lum=lum, mask=mask, maps=maps, route=route)
+        scored["id"] = kind
+        scored["label"] = label
+        scored["pickable"] = _pickable(scored)
+        sheet.append(scored)
+
+    sheet.sort(key=lambda c: (-int(c["pickable"]), -c["score"]))
+    live = [c for c in sheet if c["pickable"]]
+    winner = live[0] if live else (sheet[0] if sheet else None)
+    lock = auto_lock(sheet)
+    return {"sheet": sheet, "winner": winner, "maps": maps, "autoLock": lock}
+
+
+def auto_lock(sheet: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """Pre-confirm when the top pickable box is a blowout vs the runner-up.
+
+    Thresholds (measured on the 7-SKU analogue set, both framings):
+      top >= 90 and runner-up <= 50 → lock.
+    A 37° specular band vs a clean mid-body both score high, so CH-1011
+    does not auto-lock. A unique demo/panel against a hardware-hit class
+    box does.
+    """
+    live = [c for c in sheet if c.get("pickable")]
+    top = live[0] if live else None
+    runner = live[1] if len(live) > 1 else None
+    top_s = float(top["score"]) if top else 0.0
+    run_s = float(runner["score"]) if runner else 0.0
+    locked = bool(top and runner and top_s >= AUTO_LOCK_TOP and run_s <= AUTO_LOCK_RUNNER)
+    return {
+        "locked": locked,
+        "top": top_s,
+        "runner": run_s,
+        "winner": top if locked else None,
+        "reason": (
+            f"top {top_s:.1f} ≥ {AUTO_LOCK_TOP:.0f}, runner {run_s:.1f} ≤ {AUTO_LOCK_RUNNER:.0f}"
+            if locked
+            else "gap too small to pre-confirm"
+        ),
+    }
+

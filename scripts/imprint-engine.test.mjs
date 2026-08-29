@@ -57,7 +57,7 @@ test("engine source has no SKU literals and no sku === branches", () => {
   ]
     .map((p) => readFileSync(p, "utf8"))
     .join("\n");
-  assert.doesNotMatch(src, /TH164|BP70|NB146|P202|LR-CBL01/);
+  assert.doesNotMatch(src, /TH164|BP70|NB146|P202|LR-CBL01|CH-1011-B-G|NB38|NB50L|KC11|CLR-CBL01/);
   assert.doesNotMatch(src, /sku\s*===/);
   assert.doesNotMatch(src, /sku\.includes/);
   assert.doesNotMatch(src, /isDiscSku|isPlaceholderSku/);
@@ -331,4 +331,169 @@ test("canvas hygiene blocks spec strips and lifestyle chrome", async () => {
   assert.equal(hyg.block, true);
   assert.ok(hyg.findings.some((f) => f.code === "spec-strip" || f.code === "chrome" || f.code === "lifestyle"));
 });
+
+function rotated(cx, cy, w, h, deg) {
+  const rad = (deg * Math.PI) / 180;
+  const c = Math.cos(rad),
+    s = Math.sin(rad);
+  const hw = w / 2,
+    hh = h / 2;
+  return [
+    [-hw, -hh],
+    [hw, -hh],
+    [hw, hh],
+    [-hw, hh],
+  ].map(([x, y]) => ({ x: cx + x * c - y * s, y: cy + x * s + y * c }));
+}
+
+test("long-axis angle, not the top edge; 75° sliver is uprighted then rejected", async () => {
+  const m = await load("src/lib/imprint-engine.ts");
+  const sliver = [
+    { x: 0.48, y: 0.18 },
+    { x: 0.51, y: 0.18 },
+    { x: 0.51, y: 0.82 },
+    { x: 0.48, y: 0.82 },
+  ];
+  const top = Math.abs(Math.atan2(sliver[1].y - sliver[0].y, sliver[1].x - sliver[0].x) * (180 / Math.PI));
+  assert.ok(top < 8, `top edge ${top}`);
+  assert.ok(m.longAxisAngle(sliver) > 70);
+  const steep = rotated(0.5, 0.5, 0.4, 0.03, 75);
+  assert.ok(m.longAxisAngle(steep) > 50);
+  const scored = m.scoreCandidate({
+    quad: steep,
+    cls: "bottle",
+    body: rect(0.2, 0.1, 0.6, 0.8),
+  });
+  assert.equal(scored.veto, "sliver");
+  assert.equal(m.pickable(scored), false);
+});
+
+test("37° specular band stays offered and fitted (glare capped)", async () => {
+  const m = await load("src/lib/imprint-engine.ts");
+  const body = { x: 0.38, y: 0.12, w: 0.24, h: 0.76 };
+  const band = rotated(body.x + body.w / 2, body.y + body.h * 0.48, body.w * 0.72, body.h * 0.18, 37);
+  assert.ok(m.longAxisAngle(band) < 50);
+  const W = 80,
+    H = 80;
+  const { lum, mask } = paint(W, H, 40, (L, M) => {
+    for (let y = Math.round(body.y * H); y < (body.y + body.h) * H; y++) {
+      for (let x = Math.round(body.x * W); x < (body.x + body.w) * W; x++) {
+        M[y * W + x] = 1;
+        L[y * W + x] = 60;
+      }
+    }
+  });
+  const maps = {
+    strap: null,
+    clasp: null,
+    ribs: null,
+    specular: [m.boxOf(band)],
+    demo: null,
+    panel: null,
+  };
+  const scored = m.scoreCandidate({
+    quad: band,
+    cls: "bottle",
+    body: rect(body.x, body.y, body.w, body.h),
+    w: W,
+    h: H,
+    lum,
+    mask,
+    maps,
+  });
+  assert.ok(scored.metrics.glare >= 0.5);
+  assert.equal(scored.metrics.specularRoute, true);
+  assert.equal(scored.metrics.glarePen, 0);
+  assert.ok(scored.score >= 90, JSON.stringify(scored.reasons));
+  assert.ok(scored.offered, JSON.stringify(scored.reasons));
+  assert.ok(scored.fitted);
+  assert.ok(m.pickable(scored));
+  const sheet = m.faceCandidates({
+    cls: "bottle",
+    body: rect(body.x, body.y, body.w, body.h),
+    w: W,
+    h: H,
+    lum,
+    mask,
+    extras: [{ quad: band, id: "band", route: "specular" }],
+  });
+  const extra = sheet.sheet.find((c) => c.id === "band");
+  assert.ok(extra?.offered && extra.fitted);
+  assert.equal(sheet.autoLock.locked, false);
+});
+
+test("auto-lock 90/50; close scores stay on the sheet", async () => {
+  const m = await load("src/lib/imprint-engine.ts");
+  const lock = m.autoLock([
+    { pickable: true, score: 94, id: "demo" },
+    { pickable: true, score: 41, id: "class" },
+  ]);
+  assert.equal(lock.locked, true);
+  const close = m.autoLock([
+    { pickable: true, score: 92, id: "band" },
+    { pickable: true, score: 81, id: "class" },
+  ]);
+  assert.equal(close.locked, false);
+  const lonely = m.autoLock([{ pickable: true, score: 100, id: "class" }]);
+  assert.equal(lonely.locked, false);
+});
+
+test("cable hub and tech placeholder stay on the sheet", async () => {
+  const m = await load("src/lib/imprint-engine.ts");
+  assert.equal(m.markClassOf({ category: "Tech", name: "Charging disc cable" }), "cable");
+  const cable = m.faceCandidates({ cls: "cable", body: rect(0.32, 0.3, 0.36, 0.36) });
+  assert.ok(cable.sheet.some((c) => c.id === "hub" && c.pickable));
+  assert.equal(m.markClassOf({ category: "Tech", name: "Cork power bank" }), "tech");
+  const W = 80,
+    H = 80;
+  const { lum, mask } = paint(W, H, 20, (L, M) => {
+    for (let y = 22; y < 50; y++) {
+      for (let x = 18; x < 62; x++) {
+        M[y * W + x] = 1;
+        L[y * W + x] = 70;
+      }
+    }
+    for (let y = 30; y < 46; y++) {
+      for (let x = 28; x < 54; x++) L[y * W + x] = 200;
+    }
+  });
+  const sheet = m.faceCandidates({
+    cls: "tech",
+    body: rect(0.22, 0.28, 0.56, 0.4),
+    w: W,
+    h: H,
+    lum,
+    mask,
+  });
+  assert.ok(sheet.sheet.some((c) => c.pickable));
+});
+
+test("scoring thresholds hold on catalog and 1400-canvas framings", async () => {
+  const m = await load("src/lib/imprint-engine.ts");
+  const catalog = { x: 0.44, y: 0.18, w: 0.12, h: 0.62 };
+  const canvas = { x: 0.16, y: 0.1, w: 0.68, h: 0.8 };
+  const run = (body) => {
+    const band = rotated(body.x + body.w / 2, body.y + body.h * 0.48, body.w * 0.7, body.h * 0.2, 37);
+    return m.scoreCandidate({
+      quad: band,
+      cls: "bottle",
+      body: rect(body.x, body.y, body.w, body.h),
+      maps: {
+        strap: null,
+        clasp: null,
+        ribs: null,
+        specular: [m.boxOf(band)],
+        demo: null,
+        panel: null,
+      },
+    });
+  };
+  const a = run(catalog);
+  const b = run(canvas);
+  assert.equal(a.offered, b.offered);
+  assert.equal(a.fitted, b.fitted);
+  assert.ok(a.offered && a.fitted);
+  assert.ok(m.bodyTrusted ? m.bodyTrusted(catalog.w, "bottle") : m.classScale("bottle").bodyLow <= catalog.w);
+});
+
 

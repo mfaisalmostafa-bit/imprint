@@ -217,9 +217,22 @@ const BOTTLE_NAME = /\b(bottle|flask|tumbler|mug|cup|thermos|drinkware)\b/;
 const BAG_NAME = /\b(backpack|rucksack|tote|bag|bags)\b/;
 const NOTE_NAME = /\b(notebook|journal|diary|stationery)\b/;
 const APPAREL_NAME = /\b(polo|t-?shirt|hoodie|cap|apparel|textile)\b/;
-const AWARD_NAME = /\b(award|trophy|plaque)\b/;
+const AWARD_NAME = /\b(award|trophy|plaque|key ?tag|keychain)\b/;
 const DISPLAY_NAME = /\b(billboard|totem|signage|display)\b/;
-const TECH_NAME = /\b(power ?bank|usb|electronics)\b/;
+const TECH_NAME = /\b(power ?bank|usb|electronics|key ?tag|keychain)\b/;
+
+const EXPECTED_ASPECT: Record<MarkClass, number> = {
+  pen: 2.4,
+  bottle: 0.94,
+  bag: 1.43,
+  cable: 1,
+  notebook: 3.12,
+  apparel: 1.38,
+  tech: 1.56,
+  award: 1.25,
+  display: 1.25,
+  default: 1.25,
+};
 
 function tokeniseFamily(family?: string | { family?: string; kind?: string; class?: string } | null): string[] {
   if (!family) return [];
@@ -282,6 +295,11 @@ export const classify = markClassOf;
 
 export function classScale(cls?: MarkClass | null): ClassScale {
   return CLASS_SCALE[cls ?? "default"] ?? CLASS_SCALE.default;
+}
+
+export function bodyTrusted(bodyWidth: number, cls?: MarkClass | null) {
+  const spec = classScale(cls);
+  return spec.bodyLow <= bodyWidth && bodyWidth < spec.bodyHigh;
 }
 
 function rectQuad(cx: number, cy: number, w: number, h: number): Quad {
@@ -1087,5 +1105,415 @@ export function assertZone(cls: MarkClass, body: Quad) {
     default:
       return zb.w > 0.02 && zb.h > 0.02 && cx > b.x && cx < b.x + b.w;
   }
+}
+
+/** Ranked pick-sheet score. Geometry stays hard; quality is a score. */
+export const OFFER_FLOOR = 25;
+export const GLARE_PENALTY_CAP = 28;
+export const UPRIGHT_DEG = 50;
+export const SLIVER_MINOR = 0.05;
+export const SLIVER_ELONG = 4;
+export const SPECULAR_ROUTE = 0.55;
+export const AUTO_LOCK_TOP = 90;
+export const AUTO_LOCK_RUNNER = 50;
+
+type XY = [number, number];
+
+export function expectedAspect(cls?: MarkClass | null) {
+  return EXPECTED_ASPECT[cls ?? "default"] ?? 1.25;
+}
+
+function asXY(p: { x: number; y: number } | XY | number[]): XY {
+  if (Array.isArray(p)) return [Number(p[0]), Number(p[1])];
+  return [p.x, p.y];
+}
+
+function asPt(p: XY): { x: number; y: number } {
+  return { x: p[0], y: p[1] };
+}
+
+function quadXY(q: Quad | { x: number; y: number }[]): XY[] {
+  return q.map(asXY);
+}
+
+function quadPts(q: XY[]): Quad {
+  return [asPt(q[0]!), asPt(q[1]!), asPt(q[2]!), asPt(q[3]!)];
+}
+
+function segLen(a: XY, b: XY) {
+  return Math.hypot(b[0] - a[0], b[1] - a[1]);
+}
+
+function segAng(a: XY, b: XY) {
+  let deg = Math.abs((Math.atan2(b[1] - a[1], b[0] - a[0]) * 180) / Math.PI);
+  if (deg > 90) deg = 180 - deg;
+  return deg;
+}
+
+/** Long-axis angle — never the presented top edge. */
+export function longAxisAngle(quad: Quad | { x: number; y: number }[]) {
+  const q = quadXY(quad);
+  if (q.length < 4) return 0;
+  const d01 = segLen(q[0]!, q[1]!);
+  const d12 = segLen(q[1]!, q[2]!);
+  return d01 >= d12 ? segAng(q[0]!, q[1]!) : segAng(q[1]!, q[2]!);
+}
+
+function axesOf(quad: Quad | { x: number; y: number }[]) {
+  const q = quadXY(quad);
+  const d01 = segLen(q[0]!, q[1]!);
+  const d12 = segLen(q[1]!, q[2]!);
+  return { major: Math.max(d01, d12), minor: Math.min(d01, d12) };
+}
+
+/** Cycle so TL→TR is the long axis. Transform, not a reject. */
+export function uprightQuad(quad: Quad | { x: number; y: number }[]): Quad {
+  let q = quadXY(quad);
+  if (q.length < 4) return quadPts(q);
+  const d01 = segLen(q[0]!, q[1]!);
+  const d12 = segLen(q[1]!, q[2]!);
+  if (d12 > d01) q = [q[1]!, q[2]!, q[3]!, q[0]!];
+  if (q[1]![0] + q[1]![1] * 0.01 < q[0]![0] + q[0]![1] * 0.01 && segLen(q[0]!, q[1]!) >= segLen(q[1]!, q[2]!)) {
+    q = [q[1]!, q[0]!, q[3]!, q[2]!];
+  }
+  const ang = longAxisAngle(quadPts(q));
+  if (ang > UPRIGHT_DEG && segLen(q[1]!, q[2]!) > segLen(q[0]!, q[1]!) * 0.98) {
+    q = [q[1]!, q[2]!, q[3]!, q[0]!];
+  }
+  return quadPts(q);
+}
+
+function sampleMask(quad: Quad, w: number, h: number, mask: Uint8Array, n = 8) {
+  const q = quadXY(uprightQuad(quad));
+  let on = 0;
+  let tot = 0;
+  for (let j = 0; j < n; j++) {
+    const v = (j + 0.5) / n;
+    for (let i = 0; i < n; i++) {
+      const u = (i + 0.5) / n;
+      const a = (1 - u) * (1 - v);
+      const b = u * (1 - v);
+      const c = u * v;
+      const d = (1 - u) * v;
+      const x = a * q[0]![0] + b * q[1]![0] + c * q[2]![0] + d * q[3]![0];
+      const y = a * q[0]![1] + b * q[1]![1] + c * q[2]![1] + d * q[3]![1];
+      const ix = Math.floor(x * w);
+      const iy = Math.floor(y * h);
+      tot++;
+      if (ix >= 0 && iy >= 0 && ix < w && iy < h && mask[iy * w + ix]) on++;
+    }
+  }
+  const cx = q.reduce((s, p) => s + p[0], 0) / 4;
+  const cy = q.reduce((s, p) => s + p[1], 0) / 4;
+  const ix = Math.floor(cx * w);
+  const iy = Math.floor(cy * h);
+  const centre = ix >= 0 && iy >= 0 && ix < w && iy < h && !!mask[iy * w + ix];
+  return { frac: on / Math.max(1, tot), centre };
+}
+
+function chromeFrac(box: CropRect, w: number, h: number, lum: Float32Array) {
+  const minPx = Math.max(1, Math.round(Math.min(w, h) * 0.0025));
+  const maxPx = Math.max(5, Math.round(Math.min(w, h) * 0.0125));
+  const x0 = Math.max(0, Math.floor(box.x * w));
+  const y0 = Math.max(0, Math.floor(box.y * h));
+  const x1 = Math.min(w, Math.floor((box.x + box.w) * w) + 1);
+  const y1 = Math.min(h, Math.floor((box.y + box.h) * h) + 1);
+  if (x1 <= x0 || y1 <= y0) return 0;
+  let hits = 0;
+  let n = 0;
+  const consume = (run: number) => {
+    if (run >= minPx && run <= maxPx) hits += run;
+  };
+  for (let y = y0; y < y1; y++) {
+    let run = 0;
+    const row = y * w;
+    for (let x = x0; x < x1; x++) {
+      n++;
+      if (lum[row + x]! >= 220) run++;
+      else {
+        consume(run);
+        run = 0;
+      }
+    }
+    consume(run);
+  }
+  for (let x = x0; x < x1; x++) {
+    let run = 0;
+    for (let y = y0; y < y1; y++) {
+      if (lum[y * w + x]! >= 220) run++;
+      else {
+        consume(run);
+        run = 0;
+      }
+    }
+    consume(run);
+  }
+  return hits / Math.max(1, n * 2);
+}
+
+function glareFrac(box: CropRect, specular?: CropRect[] | null) {
+  if (!specular?.length) return 0;
+  return Math.max(...specular.map((s) => overlapFrac(box, s)));
+}
+
+function hardwareFrac(box: CropRect, maps?: SurfaceMaps | null) {
+  if (!maps) return 0;
+  let best = 0;
+  for (const o of [maps.strap, maps.clasp, maps.ribs]) {
+    if (o) best = Math.max(best, overlapFrac(box, o));
+  }
+  return best;
+}
+
+function panelAgree(box: CropRect, maps?: SurfaceMaps | null) {
+  if (!maps) return 0;
+  let best = 0;
+  for (const o of [maps.panel, maps.demo]) {
+    if (o) best = Math.max(best, overlapFrac(box, o));
+  }
+  return best;
+}
+
+function fitFace(box: CropRect, cls: MarkClass, body: CropRect): CropRect {
+  const prior = quadToBox(zoneForClass(cropToQuad(body), cls));
+  let tw = Math.min(box.w * 0.95, Math.max(box.w * 0.35, prior.w));
+  let th = Math.min(box.h * 0.95, Math.max(box.h * 0.35, prior.h));
+  tw = Math.min(tw, box.w);
+  th = Math.min(th, box.h);
+  return {
+    x: clamp(box.x + box.w / 2 - tw / 2, box.x, box.x + box.w - tw),
+    y: clamp(box.y + box.h / 2 - th / 2, box.y, box.y + box.h - th),
+    w: tw,
+    h: th,
+  };
+}
+
+export type ScoredCandidate = {
+  id?: string;
+  label?: string;
+  quad: Quad;
+  fittedQuad: Quad;
+  score: number;
+  offered: boolean;
+  fitted: boolean;
+  pickable: boolean;
+  veto: string | null;
+  reasons: string[];
+  metrics: {
+    angle: number;
+    aspect: number;
+    expectedAspect: number;
+    elong: number;
+    minorOfBody: number;
+    onBody: number;
+    centre: boolean;
+    glare: number;
+    chrome: number;
+    hardware: number;
+    panel: number;
+    offBody: number;
+    specularRoute: boolean;
+    glarePen: number;
+  };
+};
+
+export function scoreCandidate(opts: {
+  quad: Quad;
+  cls: MarkClass;
+  body: Quad | CropRect;
+  w?: number;
+  h?: number;
+  lum?: Float32Array;
+  mask?: Uint8Array;
+  maps?: SurfaceMaps | null;
+  route?: string | null;
+}): ScoredCandidate {
+  const upright = uprightQuad(opts.quad);
+  const box = boxOf(upright);
+  const bodyBox: CropRect =
+    "w" in opts.body && !Array.isArray(opts.body)
+      ? { x: opts.body.x, y: opts.body.y, w: opts.body.w, h: opts.body.h }
+      : boxOf(opts.body as Quad);
+  const { major, minor } = axesOf(upright);
+  const bodySpan = Math.max(bodyBox.w, bodyBox.h, 1e-6);
+  const minorOfBody = minor / bodySpan;
+  const elong = major / Math.max(1e-6, minor);
+  const aspect = box.w / Math.max(1e-6, box.h);
+  const expected = expectedAspect(opts.cls);
+  const aspectRatio = Math.max(aspect, expected) / Math.max(1e-6, Math.min(aspect, expected));
+  const angle = longAxisAngle(upright);
+  let onBody = 1;
+  let centre = true;
+  if (opts.w && opts.h && opts.mask) {
+    const s = sampleMask(upright, opts.w, opts.h, opts.mask);
+    onBody = s.frac;
+    centre = s.centre;
+  }
+  const offBody = Math.max(0, 1 - onBody);
+  const glare = glareFrac(box, opts.maps?.specular);
+  const chrome = opts.w && opts.h && opts.lum ? chromeFrac(box, opts.w, opts.h, opts.lum) : 0;
+  const hardware = hardwareFrac(box, opts.maps);
+  const panel = panelAgree(box, opts.maps);
+  const specularRoute = opts.route === "specular" || glare >= SPECULAR_ROUTE;
+  const reasons: string[] = [];
+  let score = 100;
+  let glarePen = 0;
+  if (specularRoute) {
+    reasons.push("glare waived — candidate is the specular route");
+  } else {
+    glarePen = Math.min(GLARE_PENALTY_CAP, glare * 48);
+    if (glarePen) {
+      score -= glarePen;
+      reasons.push(`glare ${glare.toFixed(2)} −${glarePen.toFixed(1)}`);
+    }
+  }
+  const chromePen = Math.min(32, chrome * 90);
+  if (chromePen) {
+    score -= chromePen;
+    reasons.push(`chrome ${chrome.toFixed(2)} −${chromePen.toFixed(1)}`);
+  }
+  const offPen = Math.min(40, offBody * 70);
+  if (offPen) {
+    score -= offPen;
+    reasons.push(`off-body ${offBody.toFixed(2)} −${offPen.toFixed(1)}`);
+  }
+  if (aspectRatio > 1.4) {
+    const aspPen = Math.min(22, (aspectRatio - 1.4) * 12);
+    score -= aspPen;
+    reasons.push(`aspect ${aspect.toFixed(2)} vs ${expected.toFixed(2)} −${aspPen.toFixed(1)}`);
+  }
+  const hwPen = Math.min(26, hardware * 50);
+  if (hwPen) {
+    score -= hwPen;
+    reasons.push(`hardware ${hardware.toFixed(2)} −${hwPen.toFixed(1)}`);
+  }
+  if (panel > 0.35) {
+    const bonus = panel > 0.55 ? 18 : 12;
+    score += bonus;
+    reasons.push(`panel +${bonus}`);
+  }
+  score = clamp(score, 0, 100);
+  let veto: string | null = null;
+  if (!centre) veto = "off-body-centre";
+  else if (onBody < 0.5) veto = "off-body-area";
+  else if (minorOfBody < SLIVER_MINOR && elong > SLIVER_ELONG) veto = "sliver";
+  const offered = veto === null && score >= OFFER_FLOOR;
+  const fittedBox = offered ? fitFace(box, opts.cls, bodyBox) : box;
+  const fitted = offered && fittedBox.w > 0.03 && fittedBox.h > 0.03;
+  return {
+    quad: upright,
+    fittedQuad: cropToQuad(fittedBox),
+    score,
+    offered,
+    fitted,
+    pickable: offered && fitted && !veto,
+    veto,
+    reasons,
+    metrics: {
+      angle,
+      aspect,
+      expectedAspect: expected,
+      elong,
+      minorOfBody,
+      onBody,
+      centre,
+      glare,
+      chrome,
+      hardware,
+      panel,
+      offBody,
+      specularRoute,
+      glarePen,
+    },
+  };
+}
+
+export function pickable(scored: { offered?: boolean; fitted?: boolean; veto?: string | null }) {
+  return Boolean(scored.offered && scored.fitted && !scored.veto);
+}
+
+export function faceCandidates(opts: {
+  cls: MarkClass;
+  body: Quad | CropRect;
+  w?: number;
+  h?: number;
+  lum?: Float32Array;
+  mask?: Uint8Array;
+  extras?: (Quad | { quad: Quad; id?: string; label?: string; route?: string })[];
+}) {
+  const bodyPts: Quad =
+    "w" in opts.body && !Array.isArray(opts.body) ? cropToQuad(opts.body) : (opts.body as Quad);
+  const bodyBox = boxOf(bodyPts);
+  let maps: SurfaceMaps = { strap: null, clasp: null, ribs: null, specular: [], demo: null, panel: null };
+  if (opts.w && opts.h && opts.lum && opts.mask) {
+    maps = readSurface({ w: opts.w, h: opts.h, lum: opts.lum, mask: opts.mask, body: bodyBox });
+    const ph =
+      opts.cls === "tech" || opts.cls === "default" || opts.cls === "award"
+        ? placeholderRect({ w: opts.w, h: opts.h, lum: opts.lum, mask: opts.mask })
+        : null;
+    if (ph && !maps.panel) maps.panel = ph;
+    if (maps.panel) maps.panel = fitInPanel(maps.panel, opts.cls, bodyBox);
+  }
+  const raw: { id: string; label: string; quad: Quad; route?: string }[] = [];
+  if (maps.demo) raw.push({ id: "demo", label: "where the demo print already is", quad: cropToQuad(maps.demo) });
+  if (maps.panel) raw.push({ id: "panel", label: "the flat panel", quad: cropToQuad(maps.panel) });
+  if (opts.cls === "cable") raw.push({ id: "hub", label: "the disc / hub", quad: discQuad(bodyPts) });
+  raw.push({ id: "class", label: "the usual place for this category", quad: zoneForClass(bodyPts, opts.cls) });
+  (opts.extras ?? []).forEach((item, i) => {
+    if (Array.isArray(item)) {
+      raw.push({ id: `extra-${i}`, label: "detected face", quad: item });
+    } else {
+      raw.push({
+        id: item.id ?? `extra-${i}`,
+        label: item.label ?? "detected face",
+        quad: item.quad,
+        route: item.route,
+      });
+    }
+  });
+  const seen = new Set<string>();
+  const sheet: ScoredCandidate[] = [];
+  for (const r of raw) {
+    const b = boxOf(r.quad);
+    const key = `${b.x.toFixed(3)}:${b.y.toFixed(3)}:${b.w.toFixed(3)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const scored = scoreCandidate({
+      quad: r.quad,
+      cls: opts.cls,
+      body: bodyPts,
+      w: opts.w,
+      h: opts.h,
+      lum: opts.lum,
+      mask: opts.mask,
+      maps,
+      route: r.route,
+    });
+    scored.id = r.id;
+    scored.label = r.label;
+    sheet.push(scored);
+  }
+  sheet.sort((a, b) => Number(b.pickable) - Number(a.pickable) || b.score - a.score);
+  const live = sheet.filter((c) => c.pickable);
+  const lock = autoLock(sheet);
+  return { sheet, winner: live[0] ?? sheet[0] ?? null, maps, autoLock: lock };
+}
+
+export function autoLock(sheet: ScoredCandidate[]) {
+  const live = sheet.filter((c) => c.pickable);
+  const top = live[0] ?? null;
+  const runner = live[1] ?? null;
+  const topS = top?.score ?? 0;
+  const runS = runner?.score ?? 0;
+  const locked = Boolean(top && runner && topS >= AUTO_LOCK_TOP && runS <= AUTO_LOCK_RUNNER);
+  return {
+    locked,
+    top: topS,
+    runner: runS,
+    winner: locked ? top : null,
+    reason: locked
+      ? `top ${topS.toFixed(1)} ≥ ${AUTO_LOCK_TOP}, runner ${runS.toFixed(1)} ≤ ${AUTO_LOCK_RUNNER}`
+      : "gap too small to pre-confirm",
+  };
 }
 
