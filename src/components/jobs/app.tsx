@@ -21,6 +21,9 @@ export function JobsApp() {
       <header className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border px-3 py-2">
         <p className="text-xs font-semibold tracking-[0.22em]">TEPEE-X</p>
         <StudioNav active="jobs" />
+        <a href="/cc" className="sr-only">
+          Command center
+        </a>
         <nav className="ml-auto flex gap-1">
           {JOBS.map((j) => (
             <button
