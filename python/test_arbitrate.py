@@ -83,7 +83,7 @@ class SeamTests(unittest.TestCase):
         mark = a.quad_of_box({"x": 0.45, "y": 0.20, "w": 0.08, "h": 0.50})
         rel = a.relative_of(mark, BODY)
         self.assertAlmostEqual(rel["w"], 0.08 / 0.60, places=5)
-        self.assertGreater(rel["rot"], 45)
+        self.assertAlmostEqual(rel["rot"], 0.0, delta=0.5)  # top edge of an AABB
         self.assertAlmostEqual(rel["ext"], 0.50 / 0.80, places=5)
         self.assertLess(rel["w"], rel["ext"])
 
@@ -96,6 +96,10 @@ class ProposableTests(unittest.TestCase):
     def test_n_eff_at_five_is_proposable(self):
         self.assertTrue(a.proposable(tight_unimodal(n=19, n_eff=19)))
         self.assertTrue(a.proposable({"n": 5, "n_eff": 5, "cy": {"median": 0.5, "iqr": (0.4, 0.6)}}))
+        # Five equal decks must not fail because inverse-Simpson is 4.999…
+        n_eff = a.effective_n({f"d{i}": 1.0 for i in range(5)})
+        self.assertTrue(a.proposable({"n": 5, "n_eff": n_eff}))
+        self.assertFalse(a.proposable({"n": 5, "n_eff": n_eff - 1}))
 
 
 class ArbitrateTests(unittest.TestCase):
@@ -369,6 +373,132 @@ class LearnTests(unittest.TestCase):
         self.assertGreater(cys[1] - cys[0], 0.25)
 
 
+class RouteVocabularyTests(unittest.TestCase):
+    def test_insert_is_a_seen_face(self):
+        """FIRING: engine route insert is protected as a seen face."""
+        det = {"quad": at(0.20, 0.30), "score": 85, "route": "insert"}
+        out = a.arbitrate(det, tight_unimodal(), BODY, 0.8)
+        self.assertEqual(out["source"], "detector")
+        self.assertIn("seen face", out["reason"])
+
+    def test_recipe_is_declared_not_seen(self):
+        """NOT FIRING seen-face protection: recipe is a class guess."""
+        self.assertIn("recipe", a.NOT_SEEN)
+        self.assertNotIn("recipe", a.SEEN_ROUTES)
+        self.assertFalse(a._seen_face("recipe", 85, 0.8))
+        self.assertTrue(a._seen_face("insert", 85, 0.8))
+        self.assertTrue(a._seen_face("placeholder", 100, 0.8))
+
+    def test_unknown_route_raises(self):
+        """NOT FIRING a silent drop: names the engine never emits raise."""
+        det = {"quad": at(0.53, 0.30), "score": 85, "route": "plate"}
+        with self.assertRaises(ValueError):
+            a.arbitrate(det, tight_unimodal(), BODY, 0.8)
+        with self.assertRaises(ValueError):
+            a.check_route("demo")
+
+    def test_sets_partition_the_engine(self):
+        self.assertEqual(a.SEEN_ROUTES | a.NOT_SEEN, a.ENGINE_ROUTES)
+        self.assertFalse(a.SEEN_ROUTES & a.NOT_SEEN)
+        for phantom in ("plate", "demo"):
+            self.assertNotIn(phantom, a.ENGINE_ROUTES)
+            self.assertNotIn(phantom, a.SEEN_ROUTES)
+
+
+class PriorKeyTests(unittest.TestCase):
+    def test_reads_cx_rel_not_the_dead_centre(self):
+        """FIRING: their key names round-trip to the corpus centre."""
+        prior = {
+            "class": "award",
+            "n": 38,
+            "n_eff": 12.0,
+            "cx_rel": {"median": 0.534, "iqr": (0.51, 0.54)},
+            "cy_rel": {"median": 0.529, "iqr": (0.52, 0.58)},
+            "w_of_product_w": {"median": 0.254, "iqr": (0.22, 0.26)},
+            "mark_extent_along_baseline": {"median": 0.254, "iqr": (0.22, 0.26)},
+        }
+        modes = a._modes_of(prior)
+        self.assertAlmostEqual(modes[0]["cx"], 0.534, places=3)
+        self.assertAlmostEqual(modes[0]["cy"], 0.529, places=3)
+        self.assertAlmostEqual(modes[0]["w"], 0.254, places=3)
+        out = a.arbitrate(None, prior, BODY, 0.8)
+        rel = a.relative_of(out["quad"], BODY)
+        self.assertAlmostEqual(rel["cx"], 0.534, delta=0.02)
+        self.assertNotAlmostEqual(rel["w"], 0.5, delta=0.1)
+
+    def test_unmapped_keys_raise(self):
+        """NOT FIRING a silent (0.5, 0.5) prior."""
+        with self.assertRaises(KeyError):
+            a._modes_of({"n": 19, "n_eff": 19, "modes": [{"n": 19}]})
+        with self.assertRaises(KeyError):
+            a.iqr_span(None)
+        with self.assertRaises(KeyError):
+            a.iqr_span({"median": 0.5})
+
+
+class GroupKeyTests(unittest.TestCase):
+    def test_by_and_job_are_the_concentration_keys(self):
+        """FIRING: 40 events from one `by` stay one opinion."""
+        p = a.empty_prior(
+            "drinkware",
+            [{"cx": 0.53, "cy": 0.60, "w": 0.29, "n": 19, "iqr": (0.56, 0.64)}],
+            n=19,
+            n_eff=19,
+        )
+        before = p["modes"][0]["cy"]
+        for i in range(40):
+            p = a.update_prior(
+                p,
+                {"kind": "drawn", "quad": at(0.53, 0.63), "by": "one-person", "job": f"job-{i}"},
+                BODY,
+            )
+        self.assertLess(abs(a.summarise(p)["modes"][0]["cy"] - before), 0.03)
+
+    def test_unattributable_event_raises(self):
+        """NOT FIRING id() as a group: missing by/job is an error."""
+        p = a.empty_prior(
+            "drinkware",
+            [{"cx": 0.53, "cy": 0.60, "w": 0.29, "n": 19, "iqr": (0.56, 0.64)}],
+            n=19,
+            n_eff=19,
+        )
+        with self.assertRaises(ValueError):
+            a.update_prior(p, {"kind": "drawn", "quad": at(0.53, 0.63)}, BODY)
+
+
+class RotationTests(unittest.TestCase):
+    def test_rotated_band_round_trips(self):
+        """FIRING: a 36.9° top edge comes back as 36.9°, not 0."""
+        src = a.quad_from_relative({"cx": 0.50, "cy": 0.48, "w": 0.30, "h": 0.12, "rot": 36.9}, BODY)
+        self.assertAlmostEqual(a.top_edge_deg(src), 36.9, delta=0.2)
+        rel = a.relative_of(src, BODY)
+        self.assertAlmostEqual(rel["rot"], 36.9, delta=0.2)
+        back = a.quad_from_relative(rel, BODY)
+        self.assertAlmostEqual(a.top_edge_deg(back), 36.9, delta=0.5)
+
+    def test_upright_mark_stays_upright(self):
+        """NOT FIRING rotation: an axis-aligned box stays near 0."""
+        src = a.quad_from_relative({"cx": 0.50, "cy": 0.50, "w": 0.24, "h": 0.16, "rot": 0}, BODY)
+        self.assertAlmostEqual(a.top_edge_deg(src), 0.0, delta=0.2)
+        self.assertAlmostEqual(a.relative_of(src, BODY)["rot"], 0.0, delta=0.2)
+
+
+class NearModeTests(unittest.TestCase):
+    def test_opposite_cx_is_not_agreement(self):
+        """FIRING: cy match + opposite cx does not raise confidence."""
+        prior = tight_unimodal()
+        det = {"quad": at(0.20, 0.60), "score": 90, "route": "panel"}
+        out = a.arbitrate(det, prior, BODY, 0.8)
+        self.assertNotEqual(out["source"], "agree")
+
+    def test_same_cx_and_cy_does_agree(self):
+        """NOT FIRING the miss: matching both axes is agreement."""
+        prior = tight_unimodal()
+        det = {"quad": at(0.53, 0.61), "score": 70, "route": "panel"}
+        out = a.arbitrate(det, prior, BODY, 0.8)
+        self.assertEqual(out["source"], "agree")
+
+
 class HygieneTests(unittest.TestCase):
     def test_no_sku_literals_in_source(self):
         src = pathlib.Path(__file__).with_name("arbitrate.py").read_text()
@@ -387,6 +517,15 @@ class HygieneTests(unittest.TestCase):
         self.assertAlmostEqual(a.effective_n({"a": 40}), 1.0)
         self.assertAlmostEqual(a.effective_n({f"k{i}": 1 for i in range(40)}), 40.0)
         self.assertAlmostEqual(a.effective_n({"a": 20, "b": 20}), 2.0)
+        n5 = a.effective_n({f"k{i}": 1 for i in range(5)})
+        self.assertTrue(n5 + a.N_MIN_EPS >= 5)
+
+    def test_no_id_fallback(self):
+        src = pathlib.Path(__file__).with_name("arbitrate.py").read_text()
+        self.assertNotIn("id(event)", src)
+        self.assertNotIn("id(event)", src.replace(" ", ""))
+        self.assertIn("by:", src)
+        self.assertIn("job:", src)
 
 
 if __name__ == "__main__":

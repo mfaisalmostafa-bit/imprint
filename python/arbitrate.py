@@ -7,29 +7,36 @@ Floors taken from the corpus brief, not fitted here
 ---------------------------------------------------
 N_MIN = 5         "n < 5 is reported but never proposed as a prior"
 BODY_MIN = 0.45   pages below 0.45 were dropped as unreadable
-DETECTOR_MID = 50 midpoint of the published 0–100 quality scale
+DETECTOR_MID = 50 midpoint of the 0–100 scale. Measured inert on 303
+                  photos (min score 50, 58% at 100). Kept as a floor,
+                  not adopted as a cut. SEEN_ROUTES is the live control.
 
 A row median is not evidence when n_eff is 3.3. Proposable uses n_eff,
-not n. Award n=38 with inverse-Simpson 3.3 is not a prior.
+not n, with a float tolerance so five equal decks are not 4.999…
 
-The point seam
---------------
-API in/out is {x, y} dicts. Internals are [x, y]. Crossing it implicitly
-once left a veto dead inside a broad except. Convert at the boundary.
+Vocabulary — silent mismatch is the expensive class
+---------------------------------------------------
+Engine routes (the assigner): insert, panel, placeholder, specular, hub,
+recipe, category. SEEN vs NOT_SEEN is declared. An unknown route raises.
+plate and demo are not in the engine; naming them is a defect.
 
-Unsure — measure on the 249 decks, do not treat as fitted
----------------------------------------------------------
-- drawn:chosen weight 1.0:0.5. Thirty menu picks should not equal thirty
-  drawn boxes; I do not know if 0.5 is the right ratio.
-- a chosen box in the valley does not spawn a mode (it is the least-wrong
-  of a bad menu). A drawn box can. Spawn stays invisible until n >= 5.
-- valley + seen plate: I keep the plate when body_confidence >= 0.45.
-  Measure notebook valley-detector precision before locking that.
-- grouping for n_eff is account-manager id, then deck id if AM is missing.
-  Deck-only grouping would count one AM on forty decks as forty opinions.
+Prior keys: cx_rel, cy_rel, w_of_product_w, mark_extent_along_baseline.
+Short aliases (cx, cy, w, ext) still read. A block with neither raises —
+it is not a prior at (0.5, 0.5) with IQR (0, 1).
+
+Pick grouping: `by` (person) and `job` (deck). No id() fallback. An
+event with neither raises; it is not its own independent opinion.
+
+Relative form carries `rot` (signed top-edge degrees). Reconstructing a
+quad without it flattens a fitted mark to 0°.
 
 Five methods, one spelling: UV printing, UV DTF, laser engraving,
 sublimation, embroidery. This file does not name a method.
+
+Unsure / unmeasurable until a second voter exists
+-------------------------------------------------
+drawn:chosen 1.0:0.5 — whole pick history is one person, mass caps at 1
+either way. 39+1 AM split counted as 2 here.
 """
 
 from __future__ import annotations
@@ -38,16 +45,31 @@ import math
 from typing import Any, Mapping, Sequence
 
 N_MIN = 5
+N_MIN_EPS = 1e-9
 BODY_MIN = 0.45
 DETECTOR_MID = 50.0
 
-# Routes that mean "the engine saw a face on this photo", not a guess.
-SEEN_ROUTES = frozenset({"panel", "plate", "hub", "demo", "specular"})
-# Placeholder / class / zone are fallbacks, not faces.
+# Vocabulary the engine actually assigns. verify_route_vocabulary.py
+# reads these two sets. Unknown names must not be swallowed.
+ENGINE_ROUTES = frozenset(
+    {"insert", "panel", "placeholder", "specular", "hub", "recipe", "category"}
+)
+SEEN_ROUTES = frozenset({"insert", "panel", "placeholder", "specular", "hub"})
+NOT_SEEN = frozenset({"recipe", "category"})
+if SEEN_ROUTES | NOT_SEEN != ENGINE_ROUTES or SEEN_ROUTES & NOT_SEEN:
+    raise RuntimeError("SEEN_ROUTES / NOT_SEEN do not partition ENGINE_ROUTES")
 
 W_DRAWN = 1.0
 W_CHOSEN = 0.5
 W_REJECT = 0.5
+
+# Location keys: ours first, theirs second. Missing both is an error.
+_CX = ("cx", "cx_rel")
+_CY = ("cy", "cy_rel")
+_W = ("w", "w_of_product_w")
+_EXT = ("ext", "mark_extent_along_baseline")
+_ROT = ("rot", "angle", "rotation")
+_H = ("h", "h_of_product_h")
 
 
 # ---------------------------------------------------------------------------
@@ -94,15 +116,42 @@ def quad_of_box(b: Mapping[str, float]) -> list[dict[str, float]]:
     ]
 
 
+def _pick(block: Mapping[str, Any], names: Sequence[str], *, required: bool = True) -> Any:
+    for n in names:
+        if n in block and block[n] is not None:
+            return block[n]
+    if required:
+        raise KeyError(
+            f"missing {names[0]} (also tried {list(names[1:])}); "
+            "will not invent a default"
+        )
+    return None
+
+
+def _num(value: Any, names: Sequence[str] = ("value",)) -> float:
+    if isinstance(value, Mapping):
+        if "median" in value:
+            return float(value["median"])
+        return float(_pick(value, names))
+    return float(value)
+
+
 # ---------------------------------------------------------------------------
 # Product-relative geometry (framing-invariant, always X for width)
 # ---------------------------------------------------------------------------
+
+def top_edge_deg(quad: Sequence[Any]) -> float:
+    """Signed degrees of TL→TR. The renderer maps the mark's top edge onto that."""
+    pts = quad_xy(quad)
+    return math.degrees(math.atan2(pts[1][1] - pts[0][1], pts[1][0] - pts[0][0]))
+
 
 def relative_of(quad: Sequence[Any], body: Sequence[Any]) -> dict[str, float]:
     """Centre as a fraction of the product box. Width over product width — the X axis.
 
     Never swap to height/product_height because the mark is rotated. That units
     error invented a 3× pen defect. `ext` is separate, along the mark's baseline.
+    `rot` is signed top-edge degrees so a reconstructed quad is not flattened.
     """
     q = box_of(quad)
     b = box_of(body)
@@ -110,16 +159,29 @@ def relative_of(quad: Sequence[Any], body: Sequence[Any]) -> dict[str, float]:
     bh = max(b["h"], 1e-9)
     cx = (q["x"] + q["w"] / 2 - b["x"]) / bw
     cy = (q["y"] + q["h"] / 2 - b["y"]) / bh
-    rot = _long_axis_deg(quad_xy(quad))
-    # ext: mark extent along its own baseline over the product on that axis.
-    if rot >= 45:
+    rot = top_edge_deg(quad)
+    abs_long = _long_axis_abs_deg(quad_xy(quad))
+    if abs_long >= 45:
         ext = q["h"] / bh
     else:
         ext = q["w"] / bw
-    return {"cx": cx, "cy": cy, "w": q["w"] / bw, "h": q["h"] / bh, "ext": ext, "rot": rot}
+    w = q["w"] / bw
+    h = q["h"] / bh
+    return {
+        "cx": cx,
+        "cy": cy,
+        "w": w,
+        "h": h,
+        "ext": ext,
+        "rot": rot,
+        "cx_rel": cx,
+        "cy_rel": cy,
+        "w_of_product_w": w,
+        "mark_extent_along_baseline": ext,
+    }
 
 
-def _long_axis_deg(pts: Sequence[Sequence[float]]) -> float:
+def _long_axis_abs_deg(pts: Sequence[Sequence[float]]) -> float:
     if len(pts) < 2:
         return 0.0
     d01 = math.hypot(pts[1][0] - pts[0][0], pts[1][1] - pts[0][1])
@@ -132,13 +194,27 @@ def _long_axis_deg(pts: Sequence[Sequence[float]]) -> float:
     return 180 - ang if ang > 90 else ang
 
 
-def quad_from_relative(rel: Mapping[str, float], body: Sequence[Any]) -> list[dict[str, float]]:
+def quad_from_relative(rel: Mapping[str, Any], body: Sequence[Any]) -> list[dict[str, float]]:
+    """Rebuild a quad, carrying rotation. Axis-aligned only when rot is 0."""
     b = box_of(body)
-    w = float(rel.get("w") or 0.24) * b["w"]
-    h = float(rel.get("h") or rel.get("w") or 0.24) * b["h"]
-    cx = b["x"] + float(rel["cx"]) * b["w"]
-    cy = b["y"] + float(rel["cy"]) * b["h"]
-    return quad_of_box({"x": cx - w / 2, "y": cy - h / 2, "w": w, "h": h})
+    cx_r = _num(_pick(rel, _CX))
+    cy_r = _num(_pick(rel, _CY))
+    w_r = _num(_pick(rel, _W))
+    h_val = _pick(rel, _H, required=False)
+    h_r = _num(h_val) if h_val is not None else w_r
+    rot_val = _pick(rel, _ROT, required=False)
+    rot = float(rot_val) if rot_val is not None else 0.0
+    w = w_r * b["w"]
+    h = h_r * b["h"]
+    cx = b["x"] + cx_r * b["w"]
+    cy = b["y"] + cy_r * b["h"]
+    hw, hh = w / 2, h / 2
+    rad = math.radians(rot)
+    co, si = math.cos(rad), math.sin(rad)
+    pts = []
+    for x, y in ((-hw, -hh), (hw, -hh), (hw, hh), (-hw, hh)):
+        pts.append({"x": cx + x * co - y * si, "y": cy + x * si + y * co})
+    return pts
 
 
 # ---------------------------------------------------------------------------
@@ -153,26 +229,33 @@ def effective_n(weights: Mapping[Any, float]) -> float:
     return 1.0 / sum((w / total) ** 2 for w in weights.values() if w > 0)
 
 
+def _meets_n(n: float, floor: float = N_MIN) -> bool:
+    return float(n) + N_MIN_EPS >= floor
+
+
 def proposable(prior: Mapping[str, Any] | None) -> bool:
     if not prior:
         return False
     n = float(prior.get("n") or 0)
-    n_eff = float(prior.get("n_eff") if prior.get("n_eff") is not None else n)
-    return n >= N_MIN and n_eff >= N_MIN
+    n_eff = float(prior["n_eff"]) if prior.get("n_eff") is not None else n
+    return _meets_n(n) and _meets_n(n_eff)
 
 
 def iqr_span(spec: Mapping[str, Any] | None) -> tuple[float, float, float]:
-    """Return (lo, hi, median). IQR may be a (lo,hi) pair or a width."""
-    if not spec:
-        return (0.0, 1.0, 0.5)
-    med = float(spec.get("median") if spec.get("median") is not None else spec.get("cy", spec.get("cx", 0.5)))
+    """Return (lo, hi, median). Refuses to invent a whole-product IQR."""
+    if not spec or not isinstance(spec, Mapping):
+        raise KeyError("iqr_span needs a {median, iqr} block; will not default to (0, 1)")
+    if "median" in spec:
+        med = float(spec["median"])
+    else:
+        raise KeyError("iqr_span missing median; will not default to 0.5")
     iqr = spec.get("iqr")
     if isinstance(iqr, (list, tuple)) and len(iqr) == 2:
         return float(iqr[0]), float(iqr[1]), med
     if iqr is not None:
         half = float(iqr) / 2
         return med - half, med + half, med
-    return med - 0.05, med + 0.05, med
+    raise KeyError("iqr missing; will not span the whole product")
 
 
 def in_iqr(value: float, spec: Mapping[str, Any] | None) -> bool:
@@ -180,28 +263,53 @@ def in_iqr(value: float, spec: Mapping[str, Any] | None) -> bool:
     return lo <= value <= hi
 
 
+def _as_mode(m: Mapping[str, Any]) -> dict[str, Any]:
+    cx = _num(_pick(m, _CX))
+    cy = _num(_pick(m, _CY))
+    w = _num(_pick(m, _W))
+    h_val = _pick(m, _H, required=False)
+    rot_val = _pick(m, _ROT, required=False)
+    iqr = m.get("iqr")
+    if iqr is None:
+        iqr = (cy - 0.05, cy + 0.05)
+    return {
+        "cx": cx,
+        "cy": cy,
+        "w": w,
+        "h": _num(h_val) if h_val is not None else w,
+        "rot": float(rot_val) if rot_val is not None else 0.0,
+        "n": float(m.get("n") or m.get("n_corpus") or 0),
+        "iqr": iqr,
+        "cx_rel": cx,
+        "cy_rel": cy,
+        "w_of_product_w": w,
+    }
+
+
 def _modes_of(prior: Mapping[str, Any]) -> list[dict[str, Any]]:
     modes = list(prior.get("modes") or [])
     if modes:
-        return [dict(m) for m in modes]
-    cy = prior.get("cy") or {}
-    cx = prior.get("cx") or {}
-    w = prior.get("w") or {}
-    _, _, cy_m = iqr_span(cy) if isinstance(cy, Mapping) else (0, 1, float(cy or 0.5))
-    _, _, cx_m = iqr_span(cx) if isinstance(cx, Mapping) else (0, 1, float(cx or 0.5))
-    _, _, w_m = iqr_span(w) if isinstance(w, Mapping) else (0, 1, float(w or 0.24))
-    lo, hi, _ = iqr_span(cy) if isinstance(cy, Mapping) else (cy_m - 0.05, cy_m + 0.05, cy_m)
-    return [{"cx": cx_m, "cy": cy_m, "w": w_m, "h": w_m, "n": float(prior.get("n") or 0), "iqr": (lo, hi)}]
+        return [_as_mode(m) for m in modes]
+    cx_b = _pick(prior, _CX)
+    cy_b = _pick(prior, _CY)
+    w_b = _pick(prior, _W)
+    if isinstance(cy_b, Mapping):
+        lo, hi, cy_m = iqr_span(cy_b)
+    else:
+        cy_m = float(cy_b)
+        lo, hi = cy_m - 0.05, cy_m + 0.05
+    cx_m = _num(cx_b)
+    w_m = _num(w_b)
+    return [{"cx": cx_m, "cy": cy_m, "w": w_m, "h": w_m, "rot": 0.0, "n": float(prior.get("n") or 0), "iqr": (lo, hi)}]
 
 
 def visible_modes(prior: Mapping[str, Any]) -> list[dict[str, Any]]:
     """Modes with enough mass to propose. Never the average of two."""
     out = []
     for m in _modes_of(prior):
-        n = float(m.get("n") or 0)
-        if n >= N_MIN:
+        if _meets_n(float(m.get("n") or 0)):
             out.append(m)
-    return out or []
+    return out
 
 
 def _heavier(modes: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
@@ -209,10 +317,22 @@ def _heavier(modes: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
 
 
 def _near_mode(rel: Mapping[str, float], mode: Mapping[str, Any]) -> bool:
-    lo, hi, med = iqr_span({"median": mode.get("cy"), "iqr": mode.get("iqr")})
-    # A value inside the mode IQR, or within 0.08 of its centre (named, not fitted:
-    # notebook modes sit 0.40 apart, so 0.08 cannot merge them).
-    return lo <= rel["cy"] <= hi or abs(rel["cy"] - med) <= 0.08
+    m = _as_mode(mode)
+    lo, hi, med = iqr_span({"median": float(m["cy"]), "iqr": m.get("iqr")})
+    cy_ok = lo <= float(rel["cy"]) <= hi or abs(float(rel["cy"]) - med) <= 0.08
+    cx_ok = abs(float(rel["cx"]) - float(m["cx"])) <= 0.08
+    return bool(cx_ok and cy_ok)
+
+
+def check_route(route: str) -> str:
+    if not route:
+        raise KeyError("detector route is empty; will not guess")
+    if route not in ENGINE_ROUTES:
+        raise ValueError(
+            f"unknown route {route!r}; engine emits {sorted(ENGINE_ROUTES)}; "
+            f"SEEN={sorted(SEEN_ROUTES)} NOT_SEEN={sorted(NOT_SEEN)}"
+        )
+    return route
 
 
 # ---------------------------------------------------------------------------
@@ -228,15 +348,21 @@ def _detector_conf(score: float, body_confidence: float, route: str) -> float:
 
 def _prior_conf(prior: Mapping[str, Any]) -> float:
     n_eff = float(prior.get("n_eff") if prior.get("n_eff") is not None else prior.get("n") or 0)
-    mass = n_eff / (n_eff + N_MIN)  # N_MIN is their floor, used as prior strength
-    cy = prior.get("cy") if isinstance(prior.get("cy"), Mapping) else {}
-    lo, hi, _ = iqr_span(cy)
-    # IQR of 0.5 of the product is "no zone". Tight IQR raises trust.
+    mass = n_eff / (n_eff + N_MIN)
+    cy_b = _pick(prior, _CY, required=False)
+    if isinstance(cy_b, Mapping) and "iqr" in cy_b and "median" in cy_b:
+        lo, hi, _ = iqr_span(cy_b)
+    elif prior.get("modes"):
+        m0 = _as_mode(prior["modes"][0])
+        lo, hi, _ = iqr_span({"median": m0["cy"], "iqr": m0.get("iqr")})
+    else:
+        raise KeyError("prior has no cy_rel/cy IQR; will not assume a tight zone")
     tightness = 1.0 - min(1.0, max(0.0, (hi - lo) / 0.5))
     return mass * (0.4 + 0.6 * tightness)
 
 
 def _seen_face(route: str, score: float, body_confidence: float) -> bool:
+    check_route(route)
     return route in SEEN_ROUTES and score >= DETECTOR_MID and body_confidence >= BODY_MIN
 
 
@@ -248,19 +374,22 @@ def arbitrate(
 ) -> dict[str, Any]:
     """Choose a quad and say why.
 
-    detector: {quad, score, route}  score 0–100, route is a face name
-    prior:    {n, n_eff, cx, cy, w, ext, modes?}
+    detector: {quad, score, route}  score 0–100, route is an engine face name
+    prior:    n, n_eff, cx_rel/cy_rel/w_of_product_w (or cx/cy/w), modes?
     body:     product quad, {x,y} dicts
     """
     body_q = quad_dict(quad_xy(body))
     det_quad = (detector or {}).get("quad")
     det_score = float((detector or {}).get("score") or 0)
-    route = str((detector or {}).get("route") or "")
+    route_raw = (detector or {}).get("route")
+    route = str(route_raw) if route_raw else ""
+    if det_quad and route:
+        check_route(route)
     det_rel = relative_of(det_quad, body_q) if det_quad else None
-    d_conf = _detector_conf(det_score, body_confidence, route) if det_quad else 0.0
+    d_conf = _detector_conf(det_score, body_confidence, route) if det_quad and route else 0.0
     p_ok = proposable(prior)
     modes = visible_modes(prior) if prior else []
-    p_conf = _prior_conf(prior) if p_ok else 0.0
+    p_conf = _prior_conf(prior) if p_ok and prior else 0.0
 
     def pack(quad, source: str, reason: str, confidence: float, **extra: Any) -> dict[str, Any]:
         q = quad_dict(quad_xy(quad)) if quad is not None else None
@@ -276,7 +405,6 @@ def arbitrate(
             **extra,
         }
 
-    # --- A. Prior not proposable ------------------------------------------
     if not p_ok:
         if det_quad:
             return pack(
@@ -288,7 +416,6 @@ def arbitrate(
             )
         return pack(None, "none", "no proposable prior and no detector", 0.0, priorProposable=False)
 
-    # --- B. No detector ---------------------------------------------------
     if not det_quad:
         if len(modes) >= 2:
             pick = _heavier(modes)
@@ -299,7 +426,9 @@ def arbitrate(
                 p_conf,
                 priorProposable=True,
             )
-        pick = modes[0] if modes else {"cx": 0.5, "cy": 0.5, "w": 0.24, "h": 0.24}
+        if not modes:
+            raise KeyError("proposable prior has no readable mode (cx_rel/cy_rel)")
+        pick = modes[0]
         return pack(
             quad_from_relative(pick, body_q),
             "prior",
@@ -310,11 +439,9 @@ def arbitrate(
 
     assert det_rel is not None
 
-    # Does the detector sit in a mode IQR?
     agreeing = [m for m in (modes or _modes_of(prior or {})) if _near_mode(det_rel, m)]
     in_valley = len(modes) >= 2 and not agreeing
 
-    # --- C. Agreement: raise confidence, keep the face on this photo ------
     if agreeing:
         raised = 1.0 - (1.0 - d_conf) * (1.0 - p_conf)
         return pack(
@@ -326,9 +453,8 @@ def arbitrate(
             agreedMode=agreeing[0],
         )
 
-    # --- D/E. Bimodal valley ----------------------------------------------
     if in_valley:
-        if _seen_face(route, det_score, body_confidence):
+        if route and _seen_face(route, det_score, body_confidence):
             return pack(
                 det_quad,
                 "detector",
@@ -337,7 +463,10 @@ def arbitrate(
                 priorProposable=True,
                 valley=True,
             )
-        nearest = min(modes, key=lambda m: abs(float(m["cy"]) - det_rel["cy"]))
+        nearest = min(
+            modes,
+            key=lambda m: math.hypot(float(m["cx"]) - det_rel["cx"], float(m["cy"]) - det_rel["cy"]),
+        )
         return pack(
             quad_from_relative(nearest, body_q),
             "prior-bimodal",
@@ -347,7 +476,6 @@ def arbitrate(
             valley=True,
         )
 
-    # --- H. Bad photo: body unreadable, prior is the archive --------------
     if body_confidence < BODY_MIN:
         pick = _heavier(modes) if modes else _modes_of(prior)[0]
         return pack(
@@ -358,8 +486,7 @@ def arbitrate(
             priorProposable=True,
         )
 
-    # --- G. Seen face on a readable body: do not override a plate ---------
-    if _seen_face(route, det_score, body_confidence):
+    if route and _seen_face(route, det_score, body_confidence):
         return pack(
             det_quad,
             "detector",
@@ -368,7 +495,6 @@ def arbitrate(
             priorProposable=True,
         )
 
-    # --- F. Weak detector vs proposable prior -----------------------------
     if det_score < DETECTOR_MID:
         pick = _heavier(modes) if modes else _modes_of(prior)[0]
         return pack(
@@ -379,8 +505,6 @@ def arbitrate(
             priorProposable=True,
         )
 
-    # Conflict, both middling: keep the detector (it is this photo) but do
-    # not raise confidence, and surface the prior as an alternate.
     return pack(
         det_quad,
         "detector",
@@ -398,17 +522,22 @@ def arbitrate(
 def empty_prior(class_id: str, modes: Sequence[Mapping[str, Any]], n: float, n_eff: float) -> dict[str, Any]:
     """Corpus snapshot. Pick-layer starts empty so three picks cannot rewrite it."""
     stored = []
-    for m in modes:
+    for raw in modes:
+        m = _as_mode(raw)
         stored.append(
             {
-                "cx": float(m["cx"]),
-                "cy": float(m["cy"]),
-                "cx_corpus": float(m["cx"]),
-                "cy_corpus": float(m["cy"]),
-                "w": float(m.get("w") or 0.24),
-                "h": float(m.get("h") or m.get("w") or 0.24),
-                "n_corpus": float(m.get("n") or 0),
-                "iqr": m.get("iqr") or (float(m["cy"]) - 0.05, float(m["cy"]) + 0.05),
+                "cx": m["cx"],
+                "cy": m["cy"],
+                "cx_rel": m["cx"],
+                "cy_rel": m["cy"],
+                "cx_corpus": m["cx"],
+                "cy_corpus": m["cy"],
+                "w": m["w"],
+                "w_of_product_w": m["w"],
+                "h": m["h"],
+                "rot": m["rot"],
+                "n_corpus": float(raw.get("n") or 0),
+                "iqr": m["iqr"],
                 "picks": [],
                 "rejects": [],
             }
@@ -421,31 +550,31 @@ def empty_prior(class_id: str, modes: Sequence[Mapping[str, Any]], n: float, n_e
         "n_eff": float(n_eff),
         "cx": {"median": sum(cx_vals) / len(cx_vals), "iqr": (min(cx_vals), max(cx_vals))},
         "cy": {"median": sum(cy_vals) / len(cy_vals), "iqr": (min(cy_vals), max(cy_vals))},
+        "cx_rel": {"median": sum(cx_vals) / len(cx_vals), "iqr": (min(cx_vals), max(cx_vals))},
+        "cy_rel": {"median": sum(cy_vals) / len(cy_vals), "iqr": (min(cy_vals), max(cy_vals))},
         "modes": stored,
         "events": [],
     }
 
 
 def _group_of(event: Mapping[str, Any]) -> str:
-    am = event.get("am_id")
-    if am:
-        return f"am:{am}"
-    deck = event.get("deck_id")
-    if deck:
-        return f"deck:{deck}"
-    return f"row:{id(event)}"
+    """Person (`by`) then deck (`job`). Never a memory address."""
+    by = event.get("by") if event.get("by") not in (None, "") else event.get("am_id")
+    if by:
+        return f"by:{by}"
+    job = event.get("job") if event.get("job") not in (None, "") else event.get("deck_id")
+    if job:
+        return f"job:{job}"
+    raise ValueError("event has no by/job; unattributable picks cannot update a prior")
 
 
 def _group_mass(records: Sequence[Mapping[str, Any]]) -> float:
-    """One account manager is one opinion. Drawn (1.0) outranks chosen (0.5).
-
-    40 jobs from one AM → mass 1. 40 AMs drawn → mass 40. 40 AMs chosen → mass 20.
-    Unsure: a second AM with one job beside 39 from another is mass 2 here;
-    inverse-Simpson of that split is ~1.05. I am counting the second AM. Measure it.
-    """
+    """One person is one opinion. Drawn (1.0) outranks chosen (0.5)."""
     weights: dict[str, float] = {}
     for r in records:
-        g = str(r.get("group") or "row")
+        g = str(r.get("group") or "")
+        if not g:
+            raise ValueError("pick record missing group; refusing id() fallback")
         weights[g] = weights.get(g, 0.0) + float(r.get("weight") or 0)
     return sum(min(w, 1.0) for w in weights.values())
 
@@ -483,11 +612,15 @@ def summarise(prior: Mapping[str, Any]) -> dict[str, Any]:
             {
                 "cx": cx,
                 "cy": cy,
+                "cx_rel": cx,
+                "cy_rel": cy,
                 "cx_corpus": cx_c,
                 "cy_corpus": cy_c,
                 "w": ww,
+                "w_of_product_w": ww,
                 "w_corpus": w_c,
                 "h": float(m.get("h") or ww),
+                "rot": float(m.get("rot") or 0),
                 "n": n_c + n_picks_net,
                 "n_corpus": n_c,
                 "n_picks": n_picks_net,
@@ -496,7 +629,7 @@ def summarise(prior: Mapping[str, Any]) -> dict[str, Any]:
                 "rejects": rejects,
             }
         )
-    vis = [m for m in modes_out if float(m["n"]) >= N_MIN]
+    vis = [m for m in modes_out if _meets_n(float(m["n"]))]
     n_eff = sum(float(m["n"]) for m in vis) if vis else 0.0
     out = dict(prior)
     out["modes"] = modes_out
@@ -509,8 +642,8 @@ def update_prior(prior: Mapping[str, Any], event: Mapping[str, Any], body: Seque
 
     event.kind: "drawn" | "chosen" | "reject"
     event.quad: the drawn/chosen box (required for drawn/chosen)
-    event.shortlist: offered boxes (required for reject; optional otherwise)
-    event.am_id / event.deck_id: concentration keys
+    event.shortlist: offered boxes (required for reject)
+    event.by / event.job: concentration keys (am_id / deck_id accepted as aliases)
     """
     out = {
         **prior,
@@ -528,26 +661,27 @@ def update_prior(prior: Mapping[str, Any], event: Mapping[str, Any], body: Seque
         rec = {"cy": rel["cy"], "cx": rel["cx"], "w": rel["w"], "weight": weight, "group": group, "kind": kind}
         nearby = [m for m in modes if _near_mode(rel, m)]
         if nearby:
-            target = min(nearby, key=lambda m: abs(float(m["cy"]) - rel["cy"]))
+            target = min(nearby, key=lambda m: math.hypot(float(m["cx"]) - rel["cx"], float(m["cy"]) - rel["cy"]))
             target[kind_key].append(rec)
             return
-        # Valley / new place.
         if kind == "drawn":
             modes.append(
                 {
                     "cx": rel["cx"],
                     "cy": rel["cy"],
+                    "cx_rel": rel["cx"],
+                    "cy_rel": rel["cy"],
+                    "cx_corpus": rel["cx"],
+                    "cy_corpus": rel["cy"],
                     "w": rel["w"],
                     "h": rel.get("h", rel["w"]),
+                    "rot": rel.get("rot", 0.0),
                     "n_corpus": 0.0,
                     "iqr": (rel["cy"] - 0.05, rel["cy"] + 0.05),
                     "picks": [rec] if kind_key == "picks" else [],
                     "rejects": [rec] if kind_key == "rejects" else [],
                 }
             )
-        # chosen in the valley is not a new mode. reject in the valley still
-        # lands on the nearest mode if any, else is stored on nothing (the
-        # valley has no mass to take away, which is the point).
 
     if kind == "reject":
         shortlist = list(event.get("shortlist") or [])
