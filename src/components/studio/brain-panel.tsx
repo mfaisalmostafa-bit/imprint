@@ -11,6 +11,7 @@ import { OrderBoard } from "@/components/studio/order-board";
 import { SPOT_SWATCHES, type Treatment } from "@/lib/treat";
 import { angleGuideFor, judgeCatalogAngle } from "@/lib/angle";
 import { cn } from "@/lib/utils";
+import { classScale, markClassOf } from "@/lib/imprint-engine";
 
 function Row({
   label,
@@ -70,6 +71,7 @@ export function BrainPanel({ onScan }: { onScan: () => void }) {
   const allowed = "methods" in mockup ? mockup.methods : [];
   const maxScale = "maxScale" in mockup ? mockup.maxScale : 0.9;
   const scaleCap = useStudio((s) => s.scaleCap);
+  const scaleMin = useStudio((s) => s.scaleMin);
   const sku = "sku" in mockup ? mockup.sku : "CUSTOM";
   const printWmm = "printWmm" in mockup ? mockup.printWmm : 80;
   const printHmm = "printHmm" in mockup ? mockup.printHmm : 80;
@@ -85,6 +87,10 @@ export function BrainPanel({ onScan }: { onScan: () => void }) {
       productTone: "tone" in mockup ? mockup.tone : "mid",
       invert,
       catalogQuad: mockup.id !== "custom" && "quad" in mockup ? mockup.quad : undefined,
+      category: "category" in mockup ? String(mockup.category) : "",
+      name: "name" in mockup ? String(mockup.name) : "",
+      sku,
+      id: mockup.id,
     }),
     ...inspectSubstrate({
       method,
@@ -93,13 +99,19 @@ export function BrainPanel({ onScan }: { onScan: () => void }) {
     }),
   ];
   const guide = angleGuideFor({ id: mockup.id, category: mockup.category });
+  const engine = classScale(markClassOf(mockup));
   const catalogQuad = mockup.id !== "custom" && "quad" in mockup ? mockup.quad : null;
   const judged = catalogQuad ? judgeCatalogAngle(quad, catalogQuad) : null;
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-6 overflow-y-auto p-4">
       <header className="space-y-1">
-        <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">{sku}</p>
+        <div className="flex items-center gap-2">
+          <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">{sku}</p>
+          <span className="rounded-full bg-primary px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-primary-foreground">
+            {engine.badge}
+          </span>
+        </div>
         <h2 className="font-sans text-lg font-semibold leading-tight text-foreground">{surfaceLabel}</h2>
         <p className="text-sm capitalize text-muted-foreground">{material}</p>
         {"printWmm" in mockup ? (
@@ -242,7 +254,7 @@ export function BrainPanel({ onScan }: { onScan: () => void }) {
 
       <div className="space-y-5">
         <Row label="Scale" value={`${Math.round(scale * 100)}%`}>
-          <Slider min={0.18} max={Math.min(maxScale, scaleCap)} step={0.01} value={[scale]} onValueChange={(v) => setScale(v[0] ?? scale)} />
+          <Slider min={scaleMin} max={Math.min(maxScale, scaleCap)} step={0.01} value={[scale]} onValueChange={(v) => setScale(v[0] ?? scale)} />
         </Row>
         <Row label="Depth" value={`${Math.round(opacity * 100)}%`}>
           <Slider min={0.2} max={1} step={0.01} value={[opacity]} onValueChange={(v) => setOpacity(v[0] ?? opacity)} />

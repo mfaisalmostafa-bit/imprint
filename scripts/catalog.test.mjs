@@ -18,14 +18,19 @@ const { loadCatalog, searchCatalog, pickFrontImage, recordToMockup } = await imp
   pathToFileURL(outfile).href
 );
 
-test("catalogue has more than the hardcoded photo set and SKUs stay TPX-XXX-NN", () => {
+test("catalogue has more than the hardcoded photo set and SKUs stay house codes", () => {
   const all = loadCatalog();
   assert.ok(all.length > 40);
   for (const r of all) {
-    assert.match(r.sku, /^TPX-[A-Z]{3}-\d{2}$/);
+    assert.match(r.sku, /^(TPX-[A-Z]{3}-\d{2}|[A-Z]{1,4}-?[A-Z]*\d[A-Z0-9]{0,8})$/, r.sku);
   }
   assert.ok(all.some((r) => r.proofEligible));
   assert.ok(all.some((r) => !r.proofEligible));
+  assert.ok(all.some((r) => r.sku === "TH164"));
+  assert.ok(all.some((r) => r.sku === "BP70"));
+  assert.ok(all.some((r) => r.sku === "NB146"));
+  assert.ok(all.some((r) => r.sku === "P202"));
+  assert.ok(all.some((r) => r.sku === "LR-CBL01"));
 });
 
 test("search filters by SKU and category", () => {

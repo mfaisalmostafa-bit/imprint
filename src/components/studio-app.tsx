@@ -9,6 +9,7 @@ import { LogoDock } from "@/components/studio/logo-dock";
 import { ToolRail } from "@/components/studio/tool-rail";
 import { EditorStage } from "@/components/studio/editor-stage";
 import { GenerateBar } from "@/components/studio/generate-bar";
+import { StudioNav } from "@/components/studio/studio-nav";
 import { useStudio } from "@/lib/store";
 import { compressForEdit } from "@/lib/image";
 import { detectSurface } from "@/lib/detect";
@@ -22,6 +23,7 @@ import { formatMarkSize, markSizeMm } from "@/lib/mark-size";
 import { loadOrder } from "@/lib/order";
 import { MOCKUPS } from "@/lib/mockups";
 import { angleGuideFor } from "@/lib/angle";
+import { markClassOf } from "@/lib/imprint-engine";
 
 export function StudioApp() {
   const stageRef = useRef<StageHandle>(null);
@@ -67,7 +69,7 @@ export function StudioApp() {
 
   const runLocalDetect = async (src: string) => {
     try {
-      const local = await detectSurface(src);
+      const local = await detectSurface(src, undefined, markClassOf(useStudio.getState().mockup()));
       if (local.accepted) applyScan(local);
       else {
         useStudio.getState().setScanError(local.notes);
@@ -372,8 +374,12 @@ export function StudioApp() {
         <span className="pointer-events-none absolute inset-x-0 bottom-0 h-0.5 bg-orange" aria-hidden />
         <div className="min-w-0 pr-2">
           <p className="font-sans text-[15px] font-semibold tracking-[0.18em] text-foreground">TEPEE-X</p>
-          <p className="hidden text-[11px] tracking-wide text-muted-foreground sm:block">Command Center proof</p>
+          <p className="hidden text-[11px] tracking-wide text-muted-foreground sm:block">Mockup · logo on the product</p>
         </div>
+        <StudioNav active="studio" />
+        <span className="rounded-full bg-orange px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-navy">
+          Imprint engine
+        </span>
         <select
           value={clientId}
           onChange={(e) => setClientId(e.target.value)}
@@ -403,6 +409,9 @@ export function StudioApp() {
           aria-label="Job reference"
         />
         <div className="ml-auto flex flex-wrap items-center gap-2">
+          <a href="/cc" className="flex min-h-11 items-center px-2 text-xs text-muted-foreground">
+            Hub
+          </a>
           <Button variant="ghost" size="icon" onClick={undo} disabled={!canUndo} aria-label="Undo">
             <Undo2 />
           </Button>

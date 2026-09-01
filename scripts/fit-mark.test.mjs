@@ -64,14 +64,52 @@ test("untrusted full-frame lock is not used as the print zone", async () => {
   assert.equal(kept[0].x, 0.02);
 });
 
+test("class scales replace the 0.18-0.72 body clamp", async () => {
+  const m = await load("src/lib/fit-mark.ts");
+  const slim = m.fitMarkScale({
+    bodyWidth: 0.12,
+    zoneWidth: 0.24,
+    maxScale: 0.8,
+    preferred: 0.62,
+    markClass: "bottle",
+  });
+  assert.equal(slim.trusted, true, "TH164-class slim bottle must be trusted");
+  assert.ok(slim.scale > 0.2, `bottle scale=${slim.scale}`);
+  assert.ok(slim.scale <= 0.72);
+
+  const pack = m.fitMarkScale({
+    bodyWidth: 0.88,
+    zoneWidth: 0.52,
+    maxScale: 0.8,
+    preferred: 0.58,
+    markClass: "bag",
+  });
+  assert.equal(pack.trusted, true, "BP70-class full-frame bag must be trusted");
+  assert.ok(m.markBodyRatio(pack.scale, 0.52, 0.88) <= 0.32);
+
+  const pen = m.fitMarkScale({
+    bodyWidth: 0.7,
+    zoneWidth: 0.56,
+    maxScale: 0.96,
+    preferred: 0.84,
+    markClass: "pen",
+  });
+  assert.equal(pen.trusted, true);
+  assert.ok(pen.scale >= 0.55, `pen scale=${pen.scale}`);
+});
+
 test("applyScan and detect carry the high-side guard", () => {
   const store = readFileSync("src/lib/store.ts", "utf8");
   const detect = readFileSync("src/lib/detect-core.ts", "utf8");
+  const brain = readFileSync("src/components/studio/brain-panel.tsx", "utf8");
   assert.match(store, /fitMarkScale/);
   assert.match(store, /zoneForFit/);
   assert.match(store, /scaleCap/);
+  assert.match(store, /markClassOf/);
   assert.match(store, /judgeCatalogAngle/);
   assert.match(detect, /bodyTrusted/);
   assert.match(detect, /bodyWidth/);
+  assert.match(detect, /pickZone/);
   assert.doesNotMatch(store + detect, /DEAD_IMAGE_CAP/);
+  assert.doesNotMatch(brain, /min=\{0\.18\}/);
 });
