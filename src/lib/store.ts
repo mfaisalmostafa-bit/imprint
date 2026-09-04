@@ -23,7 +23,8 @@ import type { DetectResult } from "./detect";
 import type { MethodId } from "./methods";
 import type { Treatment } from "./treat";
 import type { JobKind } from "./cc";
-import { recallPlacement, rememberPlacement } from "./placement-memory";
+import { recallPrintFace, rememberPlacement } from "./placement-memory";
+import { letterChoices, type PlaceChoice } from "./resolve-placement";
 import { fitMarkScale, zoneForFit } from "./fit-mark";
 import { judgeCatalogAngle } from "./angle";
 import { classScale, markClassOf } from "./imprint-engine";
@@ -109,6 +110,11 @@ type StudioState = {
   jobKind: JobKind;
   jobRef: string;
   compare: boolean;
+  pickOpen: boolean;
+  pickChoices: PlaceChoice[];
+  pickIndex: number;
+  sessionPick: Quad | null;
+  sessionDrawn: Quad | null;
 
   mockup: () => Mockup | CustomView;
   productSrc: () => string;
@@ -152,6 +158,10 @@ type StudioState = {
   setJobRef: (s: string) => void;
   setCompare: (v: boolean) => void;
   rememberNow: () => void;
+  setPickIndex: (i: number) => void;
+  confirmPick: () => void;
+  skipPick: () => void;
+  drawOwn: () => void;
 };
 
 export type CustomView = {
@@ -264,6 +274,11 @@ export const useStudio = create<StudioState>((set, get) => ({
   jobKind: "quote",
   jobRef: "Q-2408-01",
   compare: false,
+  pickOpen: false,
+  pickChoices: [],
+  pickIndex: 0,
+  sessionPick: null,
+  sessionDrawn: null,
   showGuides: true,
   scanning: false,
   generating: false,
@@ -318,7 +333,8 @@ export const useStudio = create<StudioState>((set, get) => ({
     const m = MOCKUPS.find((x) => x.id === id);
     if (!m) return;
     const prev = get();
-    const mem = recallPlacement(m.sku);
+    const cls = markClassOf(m);
+    const { mem, dropped } = recallPrintFace(m.sku, cls, m.quad);
     const bounds = classBounds(m);
     set({
       mockupId: m.id,
@@ -332,7 +348,11 @@ export const useStudio = create<StudioState>((set, get) => ({
       surfaceLabel: m.surface,
       material: m.material,
       confidence: 1,
-      brainNote: mem ? "Placement recalled for this SKU." : `${classScale(markClassOf(m)).badge} — catalog plane.`,
+      brainNote: dropped
+        ? `Saved override dropped (${dropped}) — catalog plane.`
+        : mem
+          ? "Placement recalled for this SKU."
+          : `${classScale(cls).badge} — catalog plane.`,
       scanError: null,
       offsetX: mem?.offsetX ?? 0,
       offsetY: mem?.offsetY ?? apparelOffset(m.id),
@@ -341,6 +361,11 @@ export const useStudio = create<StudioState>((set, get) => ({
       scaleMin: bounds.scaleMin,
       method: m.defaultMethod,
       mode: "studio",
+      sessionPick: null,
+      sessionDrawn: null,
+      pickOpen: false,
+      pickChoices: [],
+      pickIndex: 0,
     });
   },
   selectCustom: () => {
@@ -386,7 +411,7 @@ export const useStudio = create<StudioState>((set, get) => ({
       wordmark: text,
       logo: { id: "wordmark", name: text || "Wordmark", src: null, kind: "wordmark" },
     }),
-  setQuad: (quad) => set({ quad }),
+  setQuad: (quad) => set({ quad, sessionDrawn: cloneQuad(quad) }),
   setScale: (n) => {
     const s = get();
     set({ scale: clamp(n, s.scaleMin, s.scaleCap) });
@@ -461,6 +486,15 @@ export const useStudio = create<StudioState>((set, get) => ({
         preferred,
         markClass: cls,
       });
+      const rawChoices =
+        "choices" in result && Array.isArray(result.choices)
+          ? result.choices.filter((c) => c && !c.veto)
+          : [];
+      const pickChoices = letterChoices(
+        rawChoices.length
+          ? rawChoices.map((c) => ({ id: c.id, label: c.label, quad: c.quad, veto: c.veto }))
+          : [{ id: "class" as const, label: "the usual place for this category", quad, veto: null }],
+      );
       return {
         quad,
         customQuad: s.mockupId === "custom" ? quad : s.customQuad,
@@ -482,6 +516,11 @@ export const useStudio = create<StudioState>((set, get) => ({
         scale: keepCatalog ? preferred : fit.scale,
         scaleCap: maxScale,
         scaleMin: spec.minScale,
+        pickOpen: pickChoices.length > 0,
+        pickChoices,
+        pickIndex: 0,
+        sessionPick: null,
+        sessionDrawn: null,
       };
     }),
   setScanning: (v) => set({ scanning: v, scanError: v ? null : get().scanError }),
@@ -550,6 +589,31 @@ export const useStudio = create<StudioState>((set, get) => ({
   setJobKind: (k) => set({ jobKind: k }),
   setJobRef: (s) => set({ jobRef: s }),
   setCompare: (v) => set({ compare: v }),
+  setPickIndex: (i) => set({ pickIndex: i }),
+  confirmPick: () => {
+    const s = get();
+    const choice = s.pickChoices[s.pickIndex] ?? s.pickChoices[0];
+    if (!choice) {
+      set({ pickOpen: false });
+      return;
+    }
+    set({
+      quad: cloneQuad(choice.quad),
+      sessionPick: cloneQuad(choice.quad),
+      pickOpen: false,
+      showGuides: true,
+      brainNote: choice.lock
+        ? `${choice.letter} · ${choice.label}`
+        : `${choice.letter} · ${choice.label} — not a lock.`,
+    });
+  },
+  skipPick: () => set({ pickOpen: false }),
+  drawOwn: () =>
+    set({
+      pickOpen: false,
+      showGuides: true,
+      brainNote: "Draw the box on the product. The drawn box is the print face.",
+    }),
   rememberNow: () => {
     const s = get();
     const sku = "sku" in s.mockup() ? s.mockup().sku : "";

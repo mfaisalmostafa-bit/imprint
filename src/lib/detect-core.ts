@@ -6,7 +6,7 @@ import {
 } from "./geometry";
 import type { BlendMode, SurfaceTone, WrapMode } from "./mockups";
 import { bodyTrusted } from "./fit-mark";
-import { discQuad, pickZone, canvasHygiene, type MarkClass } from "./imprint-engine";
+import { discQuad, pickZone, canvasHygiene, type MarkClass, type ZoneCandidate } from "./imprint-engine";
 
 export type DetectResult = {
   accepted: boolean;
@@ -27,6 +27,7 @@ export type DetectResult = {
   bodyTrusted: boolean;
   notes: string;
   markClass?: MarkClass;
+  choices?: ZoneCandidate[];
 };
 
 export type RgbBuffers = {
@@ -431,12 +432,14 @@ export function detectFromRgb(
   );
 
   let outQuad = quad;
+  let choices: ZoneCandidate[] | undefined;
   const hyg = canvasHygiene({ w, h, lum: L, mask });
   if (markClass === "cable") {
     outQuad = discQuad(quad);
   } else if (markClass) {
     const picked = pickZone({ cls: markClass, body: quad, w, h, lum: L, mask });
     outQuad = picked.winner.quad;
+    choices = picked.candidates;
   }
   if (prior && isConvexQuad(prior)) {
     if (!trustedBody && !markClass) {
@@ -487,6 +490,7 @@ export function detectFromRgb(
     bodyWidth,
     bodyTrusted: trustedBody,
     markClass,
+    choices,
     notes: hyg.block
       ? hyg.findings[0]?.text ?? "Canvas hygiene failed."
       : !trustedBody

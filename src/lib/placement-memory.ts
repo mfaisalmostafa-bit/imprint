@@ -1,6 +1,8 @@
 import type { Quad } from "./geometry";
 import { cloneQuad } from "./geometry";
 import type { WrapMode } from "./mockups";
+import { markClassOf, type MarkClass } from "./imprint-engine";
+import { dropSaved } from "./resolve-placement";
 
 export type PlacementMemory = {
   quad: Quad;
@@ -33,6 +35,25 @@ export function recallPlacement(sku: string): PlacementMemory | null {
   };
 }
 
+/**
+ * Saved override only if it is still a print-face.
+ * Neck / skewed diamonds are dropped, not rendered. Never a SKU branch.
+ */
+export function recallPrintFace(
+  sku: string,
+  cls: MarkClass,
+  ref?: Quad | null,
+): { mem: PlacementMemory | null; dropped: string | null } {
+  const hit = recallPlacement(sku);
+  if (!hit) return { mem: null, dropped: null };
+  const why = dropSaved(hit.quad, cls, ref ?? hit.quad);
+  if (why) {
+    forgetPlacement(sku);
+    return { mem: null, dropped: why };
+  }
+  return { mem: hit, dropped: null };
+}
+
 export function rememberPlacement(sku: string, mem: PlacementMemory) {
   if (!sku || sku === "CUSTOM") return;
   try {
@@ -49,4 +70,20 @@ export function rememberPlacement(sku: string, mem: PlacementMemory) {
   } catch {
     /* quota */
   }
+}
+
+export function forgetPlacement(sku: string) {
+  if (!sku) return;
+  try {
+    const all = loadAll();
+    if (!(sku in all)) return;
+    delete all[sku];
+    localStorage.setItem(KEY, JSON.stringify(all));
+  } catch {
+    /* quota */
+  }
+}
+
+export function classOfSku(category?: string, name?: string): MarkClass {
+  return markClassOf({ category, name });
 }

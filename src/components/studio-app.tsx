@@ -10,6 +10,7 @@ import { ToolRail } from "@/components/studio/tool-rail";
 import { EditorStage } from "@/components/studio/editor-stage";
 import { GenerateBar } from "@/components/studio/generate-bar";
 import { StudioNav } from "@/components/studio/studio-nav";
+import { PickSheet } from "@/components/studio/pick-sheet";
 import { useStudio } from "@/lib/store";
 import { compressForEdit } from "@/lib/image";
 import { detectSurface } from "@/lib/detect";
@@ -61,6 +62,13 @@ export function StudioApp() {
   const scale = useStudio((s) => s.scale);
   const quad = useStudio((s) => s.quad);
   const invert = useStudio((s) => s.invert);
+  const pickOpen = useStudio((s) => s.pickOpen);
+  const pickChoices = useStudio((s) => s.pickChoices);
+  const pickIndex = useStudio((s) => s.pickIndex);
+  const setPickIndex = useStudio((s) => s.setPickIndex);
+  const confirmPick = useStudio((s) => s.confirmPick);
+  const skipPick = useStudio((s) => s.skipPick);
+  const drawOwn = useStudio((s) => s.drawOwn);
 
   const editSource =
     editTarget === "logo" && logo.src
@@ -88,6 +96,7 @@ export function StudioApp() {
       const local = await detectSurface(
         productSrc,
         mockupId === "custom" ? undefined : quad,
+        markClassOf(useStudio.getState().mockup()),
       );
       if (local.accepted) {
         applyScan(local);
@@ -342,7 +351,7 @@ export function StudioApp() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement | null)?.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA") return;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
       const k = e.key.toLowerCase();
       if ((e.metaKey || e.ctrlKey) && k === "z") {
         e.preventDefault();
@@ -378,7 +387,7 @@ export function StudioApp() {
         </div>
         <StudioNav active="studio" />
         <span className="rounded-full bg-orange px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-navy">
-          Imprint engine
+          Imprint 2
         </span>
         <select
           value={clientId}
@@ -523,6 +532,19 @@ export function StudioApp() {
             </div>
           </div>
         </div>
+      ) : null}
+
+      {pickOpen ? (
+        <PickSheet
+          src={productSrc}
+          sku={"sku" in mockup ? mockup.sku : undefined}
+          choices={pickChoices}
+          selected={pickIndex}
+          onSelect={setPickIndex}
+          onNext={confirmPick}
+          onDraw={drawOwn}
+          onSkip={skipPick}
+        />
       ) : null}
 
       <span className="sr-only">{mockupId} {scanning ? "scanning" : ""}</span>

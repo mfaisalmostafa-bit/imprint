@@ -1,10 +1,26 @@
-# TePee-X IMPRINT
+# TePee-X IMPRINT 2
 
-Three jobs. The Command Center stays at `/cc` — this does not replace it.
+Smart mockup generator. Drop a mark, scan the product plane, pick where
+the logo goes — the pick **writes the render quad**. Stale neck overrides
+are dropped. The Command Center stays at `/cc`.
 
-1. **Review** — phone-first corner-drag against the engine quad (TL, TR, BR, BL in 0–1). Save writes a shared per-SKU override. Reset to detected.
-2. **Optics** — findings against their renderer, on real catalogue photos. We do not patch their Python.
-3. **Search** — confidence UI over Photo Search. A 40% hit is not a lock. Blur / dark / too-far refuse before ranking. Several photos of one item are one answer.
+## What it does
+
+1. **Studio** — logo on the product. Scan locks the print face. The
+   "Where does the logo go?" sheet confirms a box and that box is what
+   prints. Draw-your-own still wins.
+2. **Design Jobs / Place** — phone-first corner-drag. Save writes a
+   per-SKU override only if it is still a print-face.
+3. **Optics** — findings against the renderer on catalogue photos.
+4. **Search** — Photo Search with a winner-only **It fits**. A 40% hit
+   is not a lock. A lock opens Studio on that SKU.
+
+## Placement stack
+
+drawn → pick → engine (demo > panel > class) → saved (print-face only) → class recipe.
+
+Bottle marks sit on the mid-body, not the neck. Classify by category,
+never SKU.
 
 ## Rails
 
@@ -20,7 +36,11 @@ Three jobs. The Command Center stays at `/cc` — this does not replace it.
 npm install
 npm run dev
 npm test
+python3 python/test_resolve_placement.py
+python3 python/test_crop.py
 ```
+
+Port notes for live CC: [CLAUDE.md](CLAUDE.md)
 
 ## License
 

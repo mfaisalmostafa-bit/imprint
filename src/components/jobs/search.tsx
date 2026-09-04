@@ -13,6 +13,8 @@ import {
   type CatalogVec,
   type SearchAnswer,
 } from "@/lib/photo-search";
+import { MOCKUPS } from "@/lib/mockups";
+import { useStudio } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
 export function SearchScreen() {
@@ -168,7 +170,21 @@ export function SearchScreen() {
         ))}
       </div>
       {!catalog ? <p className="text-sm text-navy/50">Loading catalogue…</p> : null}
-      {answer ? <AnswerView answer={answer} n={n} fit={fit} onFit={() => setFit(true)} /> : null}
+      {answer ? (
+        <AnswerView
+          answer={answer}
+          n={n}
+          fit={fit}
+          onFit={(sku) => {
+            setFit(true);
+            const m = MOCKUPS.find((x) => x.sku === sku);
+            if (m) {
+              useStudio.getState().selectMockup(m.id);
+              window.location.assign("/");
+            }
+          }}
+        />
+      ) : null}
     </div>
   );
 }
@@ -182,7 +198,7 @@ function AnswerView({
   answer: SearchAnswer;
   n: number;
   fit: boolean;
-  onFit: () => void;
+  onFit: (sku: string) => void;
 }) {
   if (!answer.judged) {
     return (
@@ -218,12 +234,12 @@ function AnswerView({
                 <p className="mt-2 rounded-lg bg-navy/5 p-2 text-xs text-navy/70">Same shape, different colour — confirm by eye.</p>
               ) : null}
               {lead && lock ? (
-                <Button className="mt-3 h-11 w-full bg-ok text-paper" onClick={onFit}>
-                  {fit ? "Recorded as a fit" : "It fits"}
+                <Button className="mt-3 h-11 w-full bg-ok text-paper" onClick={() => onFit(h.sku)}>
+                  {fit ? "Opening studio" : "It fits"}
                 </Button>
               ) : (
                 <Button variant="secondary" className="mt-3 h-11 w-full" disabled={!lock}>
-                  {fit ? "Recorded as a fit" : "It fits"}
+                  {fit ? "Opening studio" : "It fits"}
                 </Button>
               )}
             </div>
