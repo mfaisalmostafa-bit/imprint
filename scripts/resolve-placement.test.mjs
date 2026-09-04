@@ -42,14 +42,17 @@ test("mid-body bottle band is a print face", async () => {
   assert.equal(m.printFaceOk(MID, "bottle", BODY).ok, true);
 });
 
-test("drawn beats pick beats engine beats saved", async () => {
+test("drawn > pick > saved-if-print-face > engine; neck saved drops", async () => {
   const m = await load();
   const drawn = rect(0.4, 0.5, 0.2, 0.2);
   const pick = rect(0.41, 0.48, 0.18, 0.2);
-  let r = m.resolvePlacement({ cls: "bottle", body: BODY, drawn, pick, engine: MID, saved: m.NECK_OVERRIDE_CONTROL });
+  const staff = rect(0.39, 0.44, 0.22, 0.24);
+  let r = m.resolvePlacement({ cls: "bottle", body: BODY, drawn, pick, engine: MID, saved: staff });
   assert.equal(r.source, "drawn");
-  r = m.resolvePlacement({ cls: "bottle", body: BODY, pick, engine: MID, saved: m.NECK_OVERRIDE_CONTROL });
+  r = m.resolvePlacement({ cls: "bottle", body: BODY, pick, engine: MID, saved: staff });
   assert.equal(r.source, "pick");
+  r = m.resolvePlacement({ cls: "bottle", body: BODY, engine: MID, saved: staff });
+  assert.equal(r.source, "saved");
   r = m.resolvePlacement({ cls: "bottle", body: BODY, engine: MID, saved: m.NECK_OVERRIDE_CONTROL });
   assert.equal(r.source, "engine");
   assert.equal(r.dropped, "neck");

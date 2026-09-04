@@ -67,6 +67,13 @@ class PriorityTests(unittest.TestCase):
         self.assertEqual(r["dropped"], "neck")
         self.assertAlmostEqual(r["quad"][0]["y"], MID[0]["y"])
 
+    def test_good_saved_beats_engine(self):
+        """Aug-29: a staff lock is not clobbered by the next engine guess."""
+        engine = rect(0.36, 0.40, 0.28, 0.30)
+        r = resolve_placement("bottle", body=BODY, engine=engine, saved=MID)
+        self.assertEqual(r["source"], "saved")
+        self.assertAlmostEqual(r["quad"][0]["x"], MID[0]["x"])
+
     def test_good_saved_beats_class(self):
         r = resolve_placement("bottle", body=BODY, saved=MID)
         self.assertEqual(r["source"], "saved")

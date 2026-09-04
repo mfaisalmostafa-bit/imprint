@@ -4,12 +4,14 @@ Priority, earlier wins:
 
   1. drawn   — hand-drawn box on THIS photo
   2. pick    — "Where does the logo go?" confirm on THIS session
-  3. engine  — live pickZone winner (demo > panel > class)
-  4. saved   — stored override, only if it is still a print-face
+  3. saved   — stored HUMAN override, only if it is still a print-face
+  4. engine  — live pickZone winner (demo > panel > class)
   5. class   — category recipe, never a lock
 
-A saved override on the neck / a skewed shoulder diamond is not an override.
-Drop it. Classify by class, never SKU. MG-4018 is the control test, not a branch.
+Aug-29 class: a saved human override beats the engine. The engine
+must not clobber a staff lock. A saved override on the neck / a
+skewed shoulder diamond is not a human lock — drop it, then the
+engine may run. Classify by class, never SKU.
 */
 
 import { boxOf, type BodyBox, type MarkClass, zoneForClass } from "./imprint-engine";
@@ -150,10 +152,6 @@ export function resolvePlacement(input: ResolveInput): ResolveResult {
   }
   if (input.pick) {
     return { quad: cloneQuad(input.pick), source: "pick", dropped };
-  }
-  if (input.engine) {
-    const face = printFaceOk(input.engine, cls, ref);
-    if (face.ok) return { quad: cloneQuad(input.engine), source: "engine", dropped };
   }
   if (savedOk) {
     return { quad: cloneQuad(savedOk), source: "saved", dropped: null };

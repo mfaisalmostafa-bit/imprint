@@ -12,17 +12,18 @@ A picker tap that does not write the render quad is a lying control.
 That was MG-4018 on the phone: orange **A** on the mid-body, then the
 PNG stamped a stale neck override.
 
-Priority (do not invert):
+Priority (do not invert — Aug-29 class: staff lock beats engine):
 
 1. **drawn** — hand-drawn box on this photo
 2. **pick** — "Where does the logo go?" confirm this session
-3. **engine** — `pick_zone` winner (demo > panel > class)
-4. **saved** — stored override, only if `print_face_ok`
+3. **saved** — stored HUMAN override, only if `print_face_ok`
+4. **engine** — `pick_zone` winner (demo > panel > class)
 5. **class** — category recipe, never a lock
 
-A saved override on the neck / a skewed shoulder diamond is not an
-override. Drop it. Classify by class, never SKU. MG-4018 is the
-control test in `resolve_placement.py`, not a branch.
+A saved override on the neck / a skewed shoulder diamond is not a
+human lock. Drop it, then the engine may run. Classify by class,
+never SKU. MG-4018 is the control test in `resolve_placement.py`,
+not a branch.
 
 ## Files to port
 

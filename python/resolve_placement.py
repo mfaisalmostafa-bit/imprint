@@ -6,26 +6,17 @@ Priority, earlier wins
 ----------------------
 1. drawn   hand-drawn box on THIS photo
 2. pick    picker confirm on THIS session
-3. engine  live pick_zone winner (demo > panel > class)
-4. saved   stored override, only if it is still a print-face
+3. saved   stored HUMAN override, only if it is still a print-face
+4. engine  live pick_zone winner (demo > panel > class)
 5. class   category recipe, never a lock
 
-A saved override on the neck / a skewed shoulder diamond is not an
-override. Drop it. Classify by class, never SKU.
+Aug-29 class: a saved human override beats the engine. The engine
+must not clobber a staff lock. A saved override on the neck / a
+skewed shoulder diamond is not a human lock — drop it, then the
+engine may run.
 
-MG-4018 is the control test for the drop rule, not a SKU branch.
-Its stale quad sits on the curved neck:
-
-    (0.457, 0.214), (0.511, 0.294), (0.526, 0.420), (0.379, 0.459)
-
-Wire-up
--------
-    from resolve_placement import resolve_placement, print_face_ok
-    result = resolve_placement(cls, body=body, drawn=drawn, pick=pick,
-                               engine=engine, saved=saved)
-    # result["quad"] is what the renderer uses
-    # result["source"] is drawn|pick|engine|saved|class
-    # result["dropped"] names why a saved override was ignored
+Classify by class, never SKU. MG-4018 is the control test for the
+drop rule, not a SKU branch.
 """
 
 from __future__ import annotations
@@ -165,10 +156,6 @@ def resolve_placement(
         return {"quad": _pts(drawn), "source": "drawn", "dropped": dropped}
     if pick is not None:
         return {"quad": _pts(pick), "source": "pick", "dropped": dropped}
-    if engine is not None:
-        face = print_face_ok(engine, name, ref)
-        if face["ok"]:
-            return {"quad": _pts(engine), "source": "engine", "dropped": dropped}
     if saved_ok is not None:
         return {"quad": _pts(saved_ok), "source": "saved", "dropped": None}
     if engine is not None:

@@ -17,10 +17,11 @@ are dropped. The Command Center stays at `/cc`.
 
 ## Placement stack
 
-drawn → pick → engine (demo > panel > class) → saved (print-face only) → class recipe.
+drawn → pick → saved (print-face human lock) → engine (demo > panel > class) → class recipe.
 
-Bottle marks sit on the mid-body, not the neck. Classify by category,
-never SKU.
+A staff override beats the engine. A neck/skewed override is not a
+lock — it is dropped. Bottle marks sit on the mid-body, not the neck.
+Classify by category, never SKU.
 
 ## Rails
 
